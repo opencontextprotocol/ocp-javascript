@@ -22,7 +22,7 @@ export {
     OCPHeaders,
     OCP_CONTEXT_ID,
     OCP_SESSION,
-    OCP_AGENT_GOAL,
+    OCP_CURRENT_GOAL,
     OCP_AGENT_TYPE,
     OCP_USER,
     OCP_WORKSPACE,
