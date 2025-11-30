@@ -32,6 +32,26 @@ describe('OCP Schema Discovery', () => {
               required: false,
             },
           ],
+          responses: {
+            '200': {
+              description: 'List of users',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'integer' },
+                        name: { type: 'string' },
+                        email: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
         post: {
           summary: 'Create user',
@@ -114,6 +134,8 @@ describe('OCP Schema Discovery', () => {
       expect(getUsers!.parameters['limit'].type).toBe('integer');
       expect(getUsers!.parameters['limit'].location).toBe('query');
       expect(getUsers!.parameters['limit'].required).toBe(false);
+      expect(getUsers!.response_schema).toBeDefined();
+      expect(getUsers!.response_schema!.type).toBe('array');
 
       // Check POST /users tool
       const postUsers = tools.find((t: OCPTool) => t.name === 'post__users');
@@ -124,6 +146,7 @@ describe('OCP Schema Discovery', () => {
       expect(postUsers!.parameters['email']).toBeDefined();
       expect(postUsers!.parameters['name'].required).toBe(true);
       expect(postUsers!.parameters['email'].required).toBe(true);
+      expect(postUsers!.response_schema).toBeUndefined();
 
       // Check GET /users/{id} tool
       const getUsersId = tools.find((t: OCPTool) => t.name === 'get__users_{id}');
@@ -133,6 +156,7 @@ describe('OCP Schema Discovery', () => {
       expect(getUsersId!.parameters['id']).toBeDefined();
       expect(getUsersId!.parameters['id'].location).toBe('path');
       expect(getUsersId!.parameters['id'].required).toBe(true);
+      expect(getUsersId!.response_schema).toBeUndefined();
     });
   });
 
@@ -186,7 +210,7 @@ describe('OCP Schema Discovery', () => {
           method: 'GET',
           path: '/users',
           parameters: {},
-          response_schema: {},
+          response_schema: undefined,
           operation_id: undefined,
           tags: [],
         },
@@ -196,7 +220,7 @@ describe('OCP Schema Discovery', () => {
           method: 'POST',
           path: '/users',
           parameters: {},
-          response_schema: {},
+          response_schema: undefined,
           operation_id: undefined,
           tags: [],
         },
@@ -206,7 +230,7 @@ describe('OCP Schema Discovery', () => {
           method: 'GET',
           path: '/orders',
           parameters: {},
-          response_schema: {},
+          response_schema: undefined,
           operation_id: undefined,
           tags: [],
         },
@@ -270,7 +294,7 @@ describe('OCP Schema Discovery', () => {
             location: 'body',
           },
         },
-        response_schema: {},
+        response_schema: undefined,
         operation_id: undefined,
         tags: [],
       };
@@ -296,7 +320,7 @@ describe('OCP Schema Discovery', () => {
         method: 'GET',
         path: '/test',
         parameters: { param: { type: 'string' } },
-        response_schema: {},
+        response_schema: undefined,
         operation_id: undefined,
         tags: [],
       };
@@ -318,7 +342,7 @@ describe('OCP Schema Discovery', () => {
           method: 'GET',
           path: '/path1',
           parameters: {},
-          response_schema: {},
+          response_schema: undefined,
           operation_id: undefined,
           tags: [],
         },
@@ -328,7 +352,7 @@ describe('OCP Schema Discovery', () => {
           method: 'POST',
           path: '/path2',
           parameters: {},
-          response_schema: {},
+          response_schema: undefined,
           operation_id: undefined,
           tags: [],
         },
