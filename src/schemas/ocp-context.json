@@ -1,0 +1,138 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://opencontextprotocol.org/schemas/ocp-context.json",
+  "title": "OCP Context Object",
+  "description": "Agent context for Open Context Protocol",
+  "type": "object",
+  "required": [
+    "context_id",
+    "agent_type",
+    "created_at",
+    "last_updated"
+  ],
+  "properties": {
+    "context_id": {
+      "type": "string",
+      "pattern": "^ocp-[a-f0-9]{8,}$",
+      "description": "Unique identifier for this context"
+    },
+    "agent_type": {
+      "type": "string",
+      "description": "Type of agent creating this context"
+    },
+    "user": {
+      "type": ["string", "null"],
+      "description": "User identifier"
+    },
+    "workspace": {
+      "type": ["string", "null"],
+      "description": "Current workspace or project"
+    },
+    "current_file": {
+      "type": ["string", "null"],
+      "description": "Currently active file"
+    },
+    "current_goal": {
+      "type": ["string", "null"],
+      "description": "Agent's current objective"
+    },
+    "context_summary": {
+      "type": ["string", "null"],
+      "description": "Brief summary of conversation context"
+    },
+    "error_context": {
+      "type": ["string", "null"],
+      "description": "Error information for debugging"
+    },
+    "recent_changes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10,
+      "description": "Recent changes or modifications (max 10)",
+      "default": []
+    },
+    "session": {
+      "type": "object",
+      "description": "Session tracking information for this context",
+      "properties": {
+        "start_time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Session start timestamp"
+        },
+        "interaction_count": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Number of interactions in this session"
+        },
+        "agent_type": {
+          "type": "string",
+          "description": "Type of agent for this session"
+        }
+      },
+      "required": ["start_time", "interaction_count", "agent_type"],
+      "additionalProperties": true,
+      "default": {}
+    },
+    "history": {
+      "type": "array",
+      "description": "Chronological record of actions and API calls",
+      "items": {
+        "type": "object",
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this action occurred"
+          },
+          "action": {
+            "type": "string",
+            "description": "Type of action performed"
+          },
+          "api_endpoint": {
+            "type": ["string", "null"],
+            "description": "API endpoint called if applicable"
+          },
+          "result": {
+            "type": ["string", "null"],
+            "description": "Summary of action result"
+          },
+          "metadata": {
+            "type": "object",
+            "default": {},
+            "description": "Additional contextual data for this action"
+          }
+        },
+        "required": ["timestamp", "action"],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "api_specs": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-zA-Z0-9_-]+$": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "description": "API specifications for enhanced responses",
+      "default": {},
+      "additionalProperties": false
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this context was first created"
+    },
+    "last_updated": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this context was last modified"
+    }
+  },
+  "additionalProperties": false
+}
