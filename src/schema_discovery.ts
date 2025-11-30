@@ -119,7 +119,7 @@ export class OCPSchemaDiscovery {
             if (typeof pathItem !== 'object' || pathItem === null) continue;
 
             for (const [method, operation] of Object.entries(pathItem as Record<string, any>)) {
-                if (!['get', 'post', 'put', 'delete', 'patch', 'options', 'head'].includes(method.toLowerCase())) {
+                if (!['get', 'post', 'put', 'delete', 'patch'].includes(method.toLowerCase())) {
                     continue;
                 }
 
@@ -148,9 +148,37 @@ export class OCPSchemaDiscovery {
             return null;
         }
 
-        const operationId = operation.operationId || `${method}_${path.replace(/\//g, '_')}`;
+        // Generate tool name with proper validation and fallback logic
+        const operationId = operation.operationId;
+        let toolName: string | null = null;
+        
+        // Try operationId first
+        if (operationId) {
+            const normalizedName = this._normalizeToolName(operationId);
+            if (this._isValidToolName(normalizedName)) {
+                toolName = normalizedName;
+            }
+        }
+        
+        // If operationId failed, try fallback naming
+        if (!toolName) {
+            // Generate name from path and method
+            const cleanPath = path.replace(/\//g, '_').replace(/[{}]/g, '');
+            const fallbackName = `${method.toLowerCase()}${cleanPath}`;
+            const normalizedFallback = this._normalizeToolName(fallbackName);
+            if (this._isValidToolName(normalizedFallback)) {
+                toolName = normalizedFallback;
+            }
+        }
+        
+        // If we can't generate a valid tool name, skip this operation
+        if (!toolName) {
+            console.warn(`Skipping operation ${method} ${path}: unable to generate valid tool name`);
+            return null;
+        }
+
         const summary = operation.summary || '';
-        const description = operation.description || summary || operationId;
+        const description = operation.description || summary || `${method} ${path}`;
         const tags = operation.tags || [];
 
         // Parse parameters
@@ -164,7 +192,7 @@ export class OCPSchemaDiscovery {
         const responseSchema = this._parseResponses(operation.responses || {});
 
         return {
-            name: operationId,
+            name: toolName,
             description,
             method: method.toUpperCase(),
             path,
@@ -173,6 +201,59 @@ export class OCPSchemaDiscovery {
             operation_id: operationId,
             tags
         };
+    }
+
+    /**
+     * Normalize tool name to camelCase, removing special characters.
+     */
+    private _normalizeToolName(name: string): string {
+        if (!name) {
+            return name;
+        }
+            
+        // First, split PascalCase/camelCase words (e.g., "FetchAccount" -> "Fetch Account")
+        // Insert space before uppercase letters that follow lowercase letters or digits
+        const pascalSplit = name.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+        
+        // Replace separators (/, _, -, .) with spaces for processing
+        // Also handle multiple consecutive separators like //
+        const normalized = pascalSplit.replace(/[\/_.-]+/g, ' ');
+        
+        // Split into words and filter out empty strings
+        const words = normalized.split(' ').filter(word => word);
+        
+        if (words.length === 0) {
+            return name;
+        }
+            
+        // Convert to camelCase: first word lowercase, rest capitalize
+        const camelCaseWords = [words[0].toLowerCase()];
+        for (let i = 1; i < words.length; i++) {
+            camelCaseWords.push(words[i].charAt(0).toUpperCase() + words[i].slice(1).toLowerCase());
+        }
+                
+        return camelCaseWords.join('');
+    }
+
+    /**
+     * Check if a normalized tool name is valid.
+     */
+    private _isValidToolName(name: string): boolean {
+        if (!name) {
+            return false;
+        }
+            
+        // Must start with a letter
+        if (!/^[a-zA-Z]/.test(name)) {
+            return false;
+        }
+            
+        // Must contain at least one alphanumeric character
+        if (!/[a-zA-Z0-9]/.test(name)) {
+            return false;
+        }
+            
+        return true;
     }
 
     /**

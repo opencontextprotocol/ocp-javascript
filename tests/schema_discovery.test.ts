@@ -118,14 +118,14 @@ describe('OCP Schema Discovery', () => {
 
       // Check that we have the expected tools with deterministic names
       const toolNames = tools.map((t: OCPTool) => t.name);
-      const expectedNames = ['get__users', 'post__users', 'get__users_{id}'];
+      const expectedNames = ['getUsers', 'postUsers', 'getUsersId'];
 
       for (const expectedName of expectedNames) {
         expect(toolNames).toContain(expectedName);
       }
 
       // Check GET /users tool
-      const getUsers = tools.find((t: OCPTool) => t.name === 'get__users');
+      const getUsers = tools.find((t: OCPTool) => t.name === 'getUsers');
       expect(getUsers).toBeDefined();
       expect(getUsers!.method).toBe('GET');
       expect(getUsers!.path).toBe('/users');
@@ -138,7 +138,7 @@ describe('OCP Schema Discovery', () => {
       expect(getUsers!.response_schema!.type).toBe('array');
 
       // Check POST /users tool
-      const postUsers = tools.find((t: OCPTool) => t.name === 'post__users');
+      const postUsers = tools.find((t: OCPTool) => t.name === 'postUsers');
       expect(postUsers).toBeDefined();
       expect(postUsers!.method).toBe('POST');
       expect(postUsers!.path).toBe('/users');
@@ -149,7 +149,7 @@ describe('OCP Schema Discovery', () => {
       expect(postUsers!.response_schema).toBeUndefined();
 
       // Check GET /users/{id} tool
-      const getUsersId = tools.find((t: OCPTool) => t.name === 'get__users_{id}');
+      const getUsersId = tools.find((t: OCPTool) => t.name === 'getUsersId');
       expect(getUsersId).toBeDefined();
       expect(getUsersId!.method).toBe('GET');
       expect(getUsersId!.path).toBe('/users/{id}');
