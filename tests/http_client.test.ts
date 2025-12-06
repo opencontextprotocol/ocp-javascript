@@ -82,18 +82,20 @@ describe('OCP HTTP Client', () => {
       const addInteractionSpy = jest.spyOn(context, 'addInteraction');
 
       // Call private method
-      ocpClient['_logInteraction']('GET', 'https://api.example.com/users', 200);
+      const mockResponse = { status: 200 } as any;
+      ocpClient['_logInteraction']('GET', 'https://api.example.com/users', mockResponse);
 
       // Should log interaction
       expect(addInteractionSpy).toHaveBeenCalledWith(
         'api_call_get',
-        'https://api.example.com/users',
-        '200',
+        'GET /users',
+        'HTTP 200',
         {
           method: 'GET',
+          url: 'https://api.example.com/users',
+          domain: 'api.example.com',
           status_code: 200,
           success: true,
-          error: undefined,
         }
       );
 
@@ -118,10 +120,12 @@ describe('OCP HTTP Client', () => {
       const addInteractionSpy = jest.spyOn(context, 'addInteraction');
 
       // Test with status code
-      ocpClient['_logInteraction']('GET', 'https://api.example.com/missing', 404);
+      const mock404Response = { status: 404 } as any;
+      ocpClient['_logInteraction']('GET', 'https://api.example.com/missing', mock404Response);
 
       // Test with different status
-      ocpClient['_logInteraction']('POST', 'https://api.example.com/create', 201);
+      const mock201Response = { status: 201 } as any;
+      ocpClient['_logInteraction']('POST', 'https://api.example.com/create', mock201Response);
 
       // Test with undefined
       ocpClient['_logInteraction']('PUT', 'https://api.example.com/update', undefined);
@@ -130,43 +134,43 @@ describe('OCP HTTP Client', () => {
       expect(addInteractionSpy).toHaveBeenNthCalledWith(
         1,
         'api_call_get',
-        'https://api.example.com/missing',
-        '404',
+        'GET /missing',
+        'HTTP 404',
         {
           method: 'GET',
+          url: 'https://api.example.com/missing',
+          domain: 'api.example.com',
           status_code: 404,
           success: false,
-          error: undefined,
         }
       );
 
       expect(addInteractionSpy).toHaveBeenNthCalledWith(
         2,
         'api_call_post',
-        'https://api.example.com/create',
-        '201',
+        'POST /create', 
+        'HTTP 201',
         {
           method: 'POST',
+          url: 'https://api.example.com/create',
+          domain: 'api.example.com', 
           status_code: 201,
           success: true,
-          error: undefined,
         }
       );
 
       expect(addInteractionSpy).toHaveBeenNthCalledWith(
         3,
         'api_call_put',
-        'https://api.example.com/update',
+        'PUT /update',
         undefined,
         {
           method: 'PUT',
-          status_code: undefined,
+          url: 'https://api.example.com/update',
+          domain: 'api.example.com',
           success: false,
-          error: undefined,
         }
-      );
-
-      addInteractionSpy.mockRestore();
+      );      addInteractionSpy.mockRestore();
     });
   });
 
@@ -272,32 +276,32 @@ describe('Wrap API', () => {
   });
 
   test('wrap api basic', () => {
-    const apiClient = wrapApi(context, 'https://api.example.com');
+    const apiClient = wrapApi('https://api.example.com', context);
 
     expect(apiClient).toBeDefined();
     expect(apiClient.request).toBeDefined();
   });
 
   test('wrap api with auth token', () => {
-    const apiClient = wrapApi(context, 'https://api.github.com', { 'Authorization': 'token ghp_123456' });
+    const apiClient = wrapApi('https://api.github.com', context, { 'Authorization': 'token ghp_123456' });
 
     expect(apiClient).toBeDefined();
   });
 
   test('wrap api with bearer token', () => {
-    const apiClient = wrapApi(context, 'https://api.example.com', { 'Authorization': 'Bearer jwt_token_here' });
+    const apiClient = wrapApi('https://api.example.com', context, { 'Authorization': 'Bearer jwt_token_here' });
 
     expect(apiClient).toBeDefined();
   });
 
   test('wrap api with basic auth', () => {
-    const apiClient = wrapApi(context, 'https://api.example.com', { 'Authorization': 'Basic dXNlcjpwYXNz' });
+    const apiClient = wrapApi('https://api.example.com', context, { 'Authorization': 'Basic dXNlcjpwYXNz' });
 
     expect(apiClient).toBeDefined();
   });
 
   test('wrap api with plain token', () => {
-    const apiClient = wrapApi(context, 'https://api.example.com', { 'Authorization': 'token abc123def456' });
+    const apiClient = wrapApi('https://api.example.com', context, { 'Authorization': 'token abc123def456' });
 
     expect(apiClient).toBeDefined();
   });
@@ -308,19 +312,19 @@ describe('Wrap API', () => {
       'Accept': 'application/vnd.api+json',
     };
 
-    const apiClient = wrapApi(context, 'https://api.example.com', customHeaders);
+    const apiClient = wrapApi('https://api.example.com', context, customHeaders);
 
     expect(apiClient).toBeDefined();
   });
 
   test('wrap api base url normalization', () => {
     // Test trailing slash removal - this is implementation dependent
-    const apiClient = wrapApi(context, 'https://api.example.com/');
+    const apiClient = wrapApi('https://api.example.com/', context);
     expect(apiClient).toBeDefined();
   });
 
   test('wrap api relative url handling', async () => {
-    const apiClient = wrapApi(context, 'https://api.example.com');
+    const apiClient = wrapApi('https://api.example.com', context);
 
     const mockResponse = {
       status: 200,
@@ -341,7 +345,7 @@ describe('Wrap API', () => {
   });
 
   test('wrap api absolute url handling', async () => {
-    const apiClient = wrapApi(context, 'https://api.example.com');
+    const apiClient = wrapApi('https://api.example.com', context);
 
     const mockResponse = {
       status: 200,
@@ -416,8 +420,8 @@ describe('HTTP Client Integration', () => {
     expect(addInteractionMock).toHaveBeenCalledTimes(1);
     const interactionCall = addInteractionMock.mock.calls[0];
     expect(interactionCall[0]).toBe('api_call_get');
-    expect(interactionCall[1]).toBe('https://api.example.com/users?page=1&limit=10');
-    expect(interactionCall[2]).toBe('200');
+    expect(interactionCall[1]).toBe('GET /users');
+    expect(interactionCall[2]).toBe('HTTP 200');
 
     // Verify response
     expect(response.status).toBe(200);
@@ -474,13 +478,13 @@ describe('HTTP Client Integration', () => {
     const calls = addInteractionSpy.mock.calls;
 
     expect(calls[0][0]).toBe('api_call_get');
-    expect(calls[0][2]).toBe('200');
+    expect(calls[0][2]).toBe('HTTP 200');
 
     expect(calls[1][0]).toBe('api_call_post');
-    expect(calls[1][2]).toBe('201');
+    expect(calls[1][2]).toBe('HTTP 201');
 
     expect(calls[2][0]).toBe('api_call_delete');
-    expect(calls[2][2]).toBe('404');
+    expect(calls[2][2]).toBe('HTTP 404');
 
     addInteractionSpy.mockRestore();
   });

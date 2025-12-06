@@ -39,10 +39,12 @@ export interface OCPResponse {
 export class OCPHTTPClient {
     private context: AgentContext;
     private autoUpdateContext: boolean;
+    private baseUrl?: string;
 
-    constructor(context: AgentContext, autoUpdateContext: boolean = true) {
+    constructor(context: AgentContext, autoUpdateContext: boolean = true, baseUrl?: string) {
         this.context = context;
         this.autoUpdateContext = autoUpdateContext;
+        this.baseUrl = baseUrl?.replace(/\/$/, ''); // Remove trailing slash
     }
 
     /**
@@ -60,21 +62,47 @@ export class OCPHTTPClient {
     /**
      * Log API interaction to context.
      */
-    private _logInteraction(method: string, url: string, statusCode?: number, error?: Error): void {
+    private _logInteraction(method: string, url: string, response?: OCPResponse, error?: Error): void {
         if (!this.autoUpdateContext) {
             return;
         }
 
+        // Parse API endpoint
+        const parsedUrl = new URL(url);
+        const endpoint = `${method.toUpperCase()} ${parsedUrl.pathname}`;
+        
+        // Get status code from response
+        const statusCode = response?.status;
+        
+        // Determine result string
+        let result: string | undefined;
+        if (error) {
+            result = `Error: ${error.message}`;
+        } else if (statusCode !== undefined) {
+            result = `HTTP ${statusCode}`;
+        }
+
+        // Build interaction metadata
+        const metadata: Record<string, any> = {
+            method: method.toUpperCase(),
+            url: url,
+            domain: parsedUrl.hostname,
+            success: !error && statusCode ? statusCode >= 200 && statusCode < 300 : false,
+        };
+
+        if (statusCode !== undefined) {
+            metadata.status_code = statusCode;
+        }
+
+        if (error) {
+            metadata.error = error.message;
+        }
+
         this.context.addInteraction(
             `api_call_${method.toLowerCase()}`,
-            url,
-            error ? `Error: ${error.message}` : (statusCode !== undefined ? `${statusCode}` : undefined),
-            {
-                method,
-                status_code: statusCode,
-                success: !error && statusCode ? statusCode >= 200 && statusCode < 300 : false,
-                error: error ? error.message : undefined
-            }
+            endpoint,
+            result,
+            metadata
         );
     }
 
@@ -84,8 +112,15 @@ export class OCPHTTPClient {
     async request(method: string, url: string, options: RequestOptions = {}): Promise<OCPResponse> {
         const { params, json, headers, timeout = 30000 } = options;
 
-        // Build URL with query parameters
-        const finalUrl = new URL(url);
+        // Handle base URL for relative URLs
+        let finalUrl: URL;
+        if (this.baseUrl && !url.startsWith('http://') && !url.startsWith('https://')) {
+            finalUrl = new URL(`${this.baseUrl}${url}`);
+        } else {
+            finalUrl = new URL(url);
+        }
+        
+        // Add query parameters
         if (params) {
             for (const [key, value] of Object.entries(params)) {
                 finalUrl.searchParams.append(key, String(value));
@@ -135,7 +170,7 @@ export class OCPHTTPClient {
                 json: async () => JSON.parse(text)
             };
 
-            this._logInteraction(method, finalUrl.toString(), response.status);
+            this._logInteraction(method, finalUrl.toString(), ocpResponse);
 
             return ocpResponse;
 
@@ -188,36 +223,23 @@ export class OCPHTTPClient {
 /**
  * Create API-specific HTTP client.
  * 
- * @param context - Agent context
  * @param baseUrl - API base URL
+ * @param context - Agent context
  * @param headers - Optional headers to include in all requests
  * @returns Configured HTTP client
  */
-export function wrapApi(context: AgentContext, baseUrl: string, headers?: Record<string, string>): OCPHTTPClient {
-    const client = new OCPHTTPClient(context);
+export function wrapApi(baseUrl: string, context: AgentContext, headers?: Record<string, string>): OCPHTTPClient {
+    const client = new OCPHTTPClient(context, true, baseUrl);
     
-    // Normalize base URL (remove trailing slash)
-    const normalizedBase = baseUrl.replace(/\/$/, '');
-    
-    // Helper to build full URL
-    const buildUrl = (path: string): string => {
-        // If path is absolute URL, return it unchanged
-        if (path.startsWith('http://') || path.startsWith('https://')) {
-            return path;
-        }
-        // Otherwise, concatenate with base URL
-        return `${normalizedBase}${path}`;
-    };
-    
-    // Override request method to handle base URL and additional headers (like Python)
-    const originalRequest = client.request.bind(client);
-    client.request = (method: string, path: string, options: RequestOptions = {}) => {
-        const opts = { ...options };
-        if (headers) {
+    // Override request method to add additional headers if provided
+    if (headers) {
+        const originalRequest = client.request.bind(client);
+        client.request = (method: string, url: string, options: RequestOptions = {}) => {
+            const opts = { ...options };
             opts.headers = { ...headers, ...opts.headers };
-        }
-        return originalRequest(method, buildUrl(path), opts);
-    };
+            return originalRequest(method, url, opts);
+        };
+    }
 
     return client;
 }
