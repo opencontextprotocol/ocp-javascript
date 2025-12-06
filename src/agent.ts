@@ -11,6 +11,12 @@ import { OCPHTTPClient, OCPResponse } from './http_client.js';
 import { OCPRegistry } from './registry.js';
 import { OCPStorage } from './storage.js';
 
+const DEFAULT_AGENT_TYPE = 'ai_agent';
+const DEFAULT_CACHE_MAX_AGE_DAYS = 7;
+const DEFAULT_REQUEST_TIMEOUT = 30000;
+const CACHE_SOURCE_NAME = 'cache';
+const REGISTRY_SOURCE_PREFIX = 'registry';
+
 /**
  * OCP Agent for Context-Aware API Interactions
  * 
@@ -39,7 +45,7 @@ export class OCPAgent {
      * @param enableCache - Enable local API caching and session persistence (default: true)
      */
     constructor(
-        agentType: string = 'ai_agent',
+        agentType: string = DEFAULT_AGENT_TYPE,
         user?: string,
         workspace?: string,
         agentGoal?: string,
@@ -84,10 +90,10 @@ export class OCPAgent {
 
         // Check cache if storage enabled (7-day expiration)
         if (this.storage) {
-            const cachedSpec = await this.storage.getCachedApi(name, 7);
+            const cachedSpec = await this.storage.getCachedApi(name, DEFAULT_CACHE_MAX_AGE_DAYS);
             if (cachedSpec) {
                 this.knownApis.set(name, cachedSpec);
-                this.context.addApiSpec(name, 'cache');
+                this.context.addApiSpec(name, CACHE_SOURCE_NAME);
                 return cachedSpec;
             }
         }
@@ -103,7 +109,7 @@ export class OCPAgent {
         } else {
             // Registry lookup (new behavior)
             apiSpec = await this.registry.getApiSpec(name, baseUrl);
-            source = `registry:${name}`;
+            source = `${REGISTRY_SOURCE_PREFIX}:${name}`;
         }
 
         // Store API spec in memory
