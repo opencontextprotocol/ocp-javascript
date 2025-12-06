@@ -8,6 +8,11 @@ import { OCPAPISpec, OCPTool } from './schema_discovery.js';
 import { RegistryUnavailable, APINotFound } from './errors.js';
 
 const DEFAULT_REGISTRY_URL = 'https://registry.ocp.dev';
+const DEFAULT_TIMEOUT = 10000;
+const SEARCH_TIMEOUT = 5000;
+const DEFAULT_PER_PAGE = 10;
+const MAX_SUGGESTIONS = 3;
+const DEFAULT_API_VERSION = '1.0.0';
 
 /**
  * Registry API entry structure
@@ -63,7 +68,7 @@ export class OCPRegistry {
     async getApiSpec(name: string, baseUrl?: string): Promise<OCPAPISpec> {
         try {
             const response = await fetch(`${this.registryUrl}/api/v1/registry/${name}`, {
-                timeout: 10000
+                timeout: DEFAULT_TIMEOUT
             } as any);
             
             if (response.status === 404) {
@@ -110,12 +115,12 @@ export class OCPRegistry {
         try {
             const params = new URLSearchParams({ 
                 q: query,
-                per_page: '10'
+                per_page: DEFAULT_PER_PAGE.toString()
             });
             
             const url = `${this.registryUrl}/api/v1/search?${params.toString()}`;
             const response = await fetch(url, {
-                timeout: 5000
+                timeout: SEARCH_TIMEOUT
             } as any);
             
             if (!response.ok) {
@@ -139,7 +144,7 @@ export class OCPRegistry {
     async listApis(): Promise<string[]> {
         try {
             const response = await fetch(`${this.registryUrl}/api/v1/registry`, {
-                timeout: 10000
+                timeout: DEFAULT_TIMEOUT
             } as any);
             
             if (!response.ok) {
@@ -184,7 +189,7 @@ export class OCPRegistry {
         return {
             base_url: baseUrl,
             title: entry.display_name || entry.name,
-            version: '1.0.0',  // Registry doesn't store version
+            version: DEFAULT_API_VERSION,  // Registry doesn't store version
             description: entry.description || '',
             tools,
             raw_spec: entry  // Store the original registry entry
@@ -204,7 +209,7 @@ export class OCPRegistry {
                 suggestions = await this.searchApis(apiName.slice(0, 3));
             }
             
-            return suggestions.slice(0, 3);
+            return suggestions.slice(0, MAX_SUGGESTIONS);
             
         } catch {
             return [];
