@@ -7,7 +7,7 @@
 import { OCPAPISpec, OCPTool } from './schema_discovery.js';
 import { RegistryUnavailable, APINotFound } from './errors.js';
 
-const DEFAULT_REGISTRY_URL = 'https://registry.ocp.dev';
+const DEFAULT_REGISTRY_URL = 'https://api.opencontextprotocol.io';
 const DEFAULT_TIMEOUT = 10000;
 const SEARCH_TIMEOUT = 5000;
 const DEFAULT_PER_PAGE = 10;
