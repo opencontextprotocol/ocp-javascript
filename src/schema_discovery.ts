@@ -49,9 +49,10 @@ export class OCPSchemaDiscovery {
      * 
      * @param specUrl - URL to OpenAPI specification (JSON or YAML)
      * @param baseUrl - Optional override for API base URL
+     * @param includeTags - Optional list of tags to filter tools by (only tools with these tags will be included)
      * @returns API specification with extracted tools
      */
-    async discoverApi(specUrl: string, baseUrl?: string): Promise<OCPAPISpec> {
+    async discoverApi(specUrl: string, baseUrl?: string, includeTags?: string[]): Promise<OCPAPISpec> {
         // Check cache
         if (this.cache.has(specUrl)) {
             return this.cache.get(specUrl)!;
@@ -63,6 +64,19 @@ export class OCPSchemaDiscovery {
             
             // Cache the result
             this.cache.set(specUrl, apiSpec);
+            
+            // Apply tag filtering if specified (only on newly parsed specs)
+            if (includeTags) {
+                const filteredTools = this._filterToolsByTags(apiSpec.tools, includeTags);
+                return {
+                    base_url: apiSpec.base_url,
+                    title: apiSpec.title,
+                    version: apiSpec.version,
+                    description: apiSpec.description,
+                    tools: filteredTools,
+                    raw_spec: apiSpec.raw_spec
+                };
+            }
             
             return apiSpec;
         } catch (error) {
@@ -343,6 +357,23 @@ export class OCPSchemaDiscovery {
         return apiSpec.tools.filter(tool => 
             tool.tags && tool.tags.includes(tag)
         );
+    }
+
+    /**
+     * Filter tools to only include those that have at least one matching tag.
+     */
+    private _filterToolsByTags(tools: OCPTool[], includeTags: string[]): OCPTool[] {
+        if (!includeTags || includeTags.length === 0) {
+            return tools;
+        }
+
+        return tools.filter(tool => {
+            if (!tool.tags || tool.tags.length === 0) {
+                return false;
+            }
+            // Check if any of the tool's tags match any of the includeTags
+            return tool.tags.some(tag => includeTags.includes(tag));
+        });
     }
 
     /**
