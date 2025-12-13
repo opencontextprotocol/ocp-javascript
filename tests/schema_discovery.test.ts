@@ -377,8 +377,8 @@ describe('OCP Schema Discovery', () => {
     });
   });
 
-  describe('Tag Filtering', () => {
-    const openApiSpecWithTags = {
+  describe('Resource Filtering', () => {
+    const openApiSpecWithResources = {
       openapi: '3.0.0',
       info: { title: 'GitHub API', version: '3.0' },
       servers: [{ url: 'https://api.github.com' }],
@@ -387,7 +387,6 @@ describe('OCP Schema Discovery', () => {
           get: {
             operationId: 'repos/get',
             summary: 'Get a repository',
-            tags: ['repos'],
             parameters: [
               { name: 'owner', in: 'path', required: true, schema: { type: 'string' } },
               { name: 'repo', in: 'path', required: true, schema: { type: 'string' } }
@@ -399,7 +398,6 @@ describe('OCP Schema Discovery', () => {
           get: {
             operationId: 'repos/listForAuthenticatedUser',
             summary: 'List user repositories',
-            tags: ['repos'],
             responses: { '200': { description: 'List of repositories' } }
           }
         },
@@ -407,7 +405,6 @@ describe('OCP Schema Discovery', () => {
           get: {
             operationId: 'issues/listForRepo',
             summary: 'List repository issues',
-            tags: ['issues'],
             parameters: [
               { name: 'owner', in: 'path', required: true, schema: { type: 'string' } },
               { name: 'repo', in: 'path', required: true, schema: { type: 'string' } }
@@ -419,7 +416,6 @@ describe('OCP Schema Discovery', () => {
           get: {
             operationId: 'orgs/listMembers',
             summary: 'List organization members',
-            tags: ['orgs'],
             parameters: [
               { name: 'org', in: 'path', required: true, schema: { type: 'string' } }
             ],
@@ -429,7 +425,7 @@ describe('OCP Schema Discovery', () => {
       }
     };
 
-    const toolsWithTags: OCPTool[] = [
+    const toolsWithResources: OCPTool[] = [
       {
         name: 'reposGet',
         description: 'Get a repository',
@@ -468,60 +464,63 @@ describe('OCP Schema Discovery', () => {
       }
     ];
 
-    test('_filterToolsByTags with single tag', () => {
-      const filtered = (discovery as any)._filterToolsByTags(toolsWithTags, ['repos']);
+    test('_filterToolsByResources with single resource', () => {
+      const filtered = (discovery as any)._filterToolsByResources(toolsWithResources, ['repos']);
       
-      expect(filtered.length).toBe(2);
-      expect(filtered.every((tool: OCPTool) => tool.name.startsWith('repos'))).toBe(true);
-      expect(filtered.every((tool: OCPTool) => tool.tags?.includes('repos'))).toBe(true);
+      expect(filtered.length).toBe(3); // /repos/{owner}/{repo}, /user/repos, /repos/{owner}/{repo}/issues
+      const paths = new Set(filtered.map((tool: OCPTool) => tool.path));
+      expect(paths.has('/repos/{owner}/{repo}')).toBe(true);
+      expect(paths.has('/user/repos')).toBe(true);
+      expect(paths.has('/repos/{owner}/{repo}/issues')).toBe(true);
     });
 
-    test('_filterToolsByTags with multiple tags', () => {
-      const filtered = (discovery as any)._filterToolsByTags(toolsWithTags, ['repos', 'issues']);
+    test('_filterToolsByResources with multiple resources', () => {
+      const filtered = (discovery as any)._filterToolsByResources(toolsWithResources, ['repos', 'orgs']);
       
-      expect(filtered.length).toBe(3);
-      const toolNames = new Set(filtered.map((tool: OCPTool) => tool.name));
-      expect(toolNames.has('reposGet')).toBe(true);
-      expect(toolNames.has('reposListForAuthenticatedUser')).toBe(true);
-      expect(toolNames.has('issuesListForRepo')).toBe(true);
-      expect(toolNames.has('orgsListMembers')).toBe(false);
+      expect(filtered.length).toBe(4); // All tools have repos or orgs in path
     });
 
-    test('_filterToolsByTags with no matches', () => {
-      const filtered = (discovery as any)._filterToolsByTags(toolsWithTags, ['nonexistent', 'missing']);
+    test('_filterToolsByResources case insensitive', () => {
+      const filtered = (discovery as any)._filterToolsByResources(toolsWithResources, ['REPOS', 'Orgs']);
+      
+      expect(filtered.length).toBe(4);
+    });
+
+    test('_filterToolsByResources with no matches', () => {
+      const filtered = (discovery as any)._filterToolsByResources(toolsWithResources, ['payments', 'customers']);
       
       expect(filtered.length).toBe(0);
     });
 
-    test('_filterToolsByTags with empty includeTags', () => {
-      const filtered = (discovery as any)._filterToolsByTags(toolsWithTags, []);
+    test('_filterToolsByResources with empty includeResources', () => {
+      const filtered = (discovery as any)._filterToolsByResources(toolsWithResources, []);
       
       expect(filtered.length).toBe(4);
-      expect(filtered).toEqual(toolsWithTags);
+      expect(filtered).toEqual(toolsWithResources);
     });
 
-    test('_filterToolsByTags with undefined includeTags', () => {
-      const filtered = (discovery as any)._filterToolsByTags(toolsWithTags, undefined);
+    test('_filterToolsByResources with undefined includeResources', () => {
+      const filtered = (discovery as any)._filterToolsByResources(toolsWithResources, undefined);
       
       expect(filtered.length).toBe(4);
-      expect(filtered).toEqual(toolsWithTags);
+      expect(filtered).toEqual(toolsWithResources);
     });
 
-    test('_filterToolsByTags with tools without tags', () => {
-      const toolsNoTags = [
-        { name: 'tool1', description: 'First tool', method: 'GET', path: '/tool1', parameters: {}, tags: undefined },
-        { name: 'tool2', description: 'Second tool', method: 'GET', path: '/tool2', parameters: {}, tags: [] }
+    test('_filterToolsByResources partial match', () => {
+      const tools = [
+        { name: 'listPaymentMethods', description: 'List payment methods', method: 'GET', path: '/v1/payment_methods', parameters: {} },
+        { name: 'createPaymentIntent', description: 'Create payment intent', method: 'POST', path: '/v1/payment_intents', parameters: {} }
       ];
       
-      const filtered = (discovery as any)._filterToolsByTags(toolsNoTags, ['any_tag']);
-      expect(filtered.length).toBe(0);
+      const filtered = (discovery as any)._filterToolsByResources(tools, ['payment']);
+      expect(filtered.length).toBe(2);
     });
 
-    test('discoverApi with includeTags parameter', async () => {
+    test('discoverApi with includeResources parameter', async () => {
       const mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => openApiSpecWithTags,
+        json: async () => openApiSpecWithResources,
       } as Response);
 
       const apiSpec = await discovery.discoverApi(
@@ -530,48 +529,36 @@ describe('OCP Schema Discovery', () => {
         ['repos']
       );
 
-      expect(apiSpec.tools.length).toBe(2);
-      expect(apiSpec.tools.every(tool => tool.tags?.includes('repos'))).toBe(true);
-      expect(apiSpec.tools.some(tool => tool.name === 'reposGet')).toBe(true);
-      expect(apiSpec.tools.some(tool => tool.name === 'reposListForAuthenticatedUser')).toBe(true);
+      expect(apiSpec.tools.length).toBe(3);
+      expect(apiSpec.tools.every(tool => tool.path.toLowerCase().includes('repos'))).toBe(true);
     });
 
-    test('discoverApi with multiple includeTags', async () => {
+    test('discoverApi with multiple includeResources', async () => {
       const mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => openApiSpecWithTags,
+        json: async () => openApiSpecWithResources,
       } as Response);
 
       const apiSpec = await discovery.discoverApi(
         'https://api.github.com/openapi.json',
         undefined,
-        ['repos', 'issues']
+        ['repos', 'issues', 'orgs']
       );
 
-      expect(apiSpec.tools.length).toBe(3);
-      const toolNames = new Set(apiSpec.tools.map(tool => tool.name));
-      expect(toolNames.has('reposGet')).toBe(true);
-      expect(toolNames.has('reposListForAuthenticatedUser')).toBe(true);
-      expect(toolNames.has('issuesListForRepo')).toBe(true);
-      expect(toolNames.has('orgsListMembers')).toBe(false);
+      expect(apiSpec.tools.length).toBe(4);
     });
 
-    test('discoverApi without includeTags returns all tools', async () => {
+    test('discoverApi without includeResources returns all tools', async () => {
       const mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => openApiSpecWithTags,
+        json: async () => openApiSpecWithResources,
       } as Response);
 
       const apiSpec = await discovery.discoverApi('https://api.github.com/openapi.json');
 
       expect(apiSpec.tools.length).toBe(4);
-      const toolNames = new Set(apiSpec.tools.map(tool => tool.name));
-      expect(toolNames.has('reposGet')).toBe(true);
-      expect(toolNames.has('reposListForAuthenticatedUser')).toBe(true);
-      expect(toolNames.has('issuesListForRepo')).toBe(true);
-      expect(toolNames.has('orgsListMembers')).toBe(true);
     });
   });
 });

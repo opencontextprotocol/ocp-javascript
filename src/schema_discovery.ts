@@ -49,10 +49,10 @@ export class OCPSchemaDiscovery {
      * 
      * @param specUrl - URL to OpenAPI specification (JSON or YAML)
      * @param baseUrl - Optional override for API base URL
-     * @param includeTags - Optional list of tags to filter tools by (only tools with these tags will be included)
+     * @param includeResources - Optional list of resource names to filter tools by (case-insensitive path matching)
      * @returns API specification with extracted tools
      */
-    async discoverApi(specUrl: string, baseUrl?: string, includeTags?: string[]): Promise<OCPAPISpec> {
+    async discoverApi(specUrl: string, baseUrl?: string, includeResources?: string[]): Promise<OCPAPISpec> {
         // Check cache
         if (this.cache.has(specUrl)) {
             return this.cache.get(specUrl)!;
@@ -65,9 +65,9 @@ export class OCPSchemaDiscovery {
             // Cache the result
             this.cache.set(specUrl, apiSpec);
             
-            // Apply tag filtering if specified (only on newly parsed specs)
-            if (includeTags) {
-                const filteredTools = this._filterToolsByTags(apiSpec.tools, includeTags);
+            // Apply resource filtering if specified (only on newly parsed specs)
+            if (includeResources) {
+                const filteredTools = this._filterToolsByResources(apiSpec.tools, includeResources);
                 return {
                     base_url: apiSpec.base_url,
                     title: apiSpec.title,
@@ -360,19 +360,26 @@ export class OCPSchemaDiscovery {
     }
 
     /**
-     * Filter tools to only include those that have at least one matching tag.
+     * Filter tools to only include those whose paths contain at least one matching resource name.
      */
-    private _filterToolsByTags(tools: OCPTool[], includeTags: string[]): OCPTool[] {
-        if (!includeTags || includeTags.length === 0) {
+    private _filterToolsByResources(tools: OCPTool[], includeResources: string[]): OCPTool[] {
+        if (!includeResources || includeResources.length === 0) {
             return tools;
         }
 
+        // Normalize resource names to lowercase for case-insensitive matching
+        const normalizedResources = includeResources.map(r => r.toLowerCase());
+
         return tools.filter(tool => {
-            if (!tool.tags || tool.tags.length === 0) {
-                return false;
-            }
-            // Check if any of the tool's tags match any of the includeTags
-            return tool.tags.some(tag => includeTags.includes(tag));
+            // Extract path segments and normalize to lowercase
+            const pathLower = tool.path.toLowerCase();
+            // Split path by '/' and filter out empty segments and parameter placeholders
+            const segments = pathLower.split('/').filter(seg => seg && !seg.startsWith('{'));
+            
+            // Check if any segment contains any of the includeResources
+            return segments.some(segment => 
+                normalizedResources.some(resource => segment.includes(resource))
+            );
         });
     }
 
