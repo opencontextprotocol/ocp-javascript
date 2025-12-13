@@ -467,23 +467,22 @@ describe('OCP Schema Discovery', () => {
     test('_filterToolsByResources with single resource', () => {
       const filtered = (discovery as any)._filterToolsByResources(toolsWithResources, ['repos']);
       
-      expect(filtered.length).toBe(3); // /repos/{owner}/{repo}, /user/repos, /repos/{owner}/{repo}/issues
+      expect(filtered.length).toBe(2); // /repos/{owner}/{repo}, /repos/{owner}/{repo}/issues (NOT /user/repos)
       const paths = new Set(filtered.map((tool: OCPTool) => tool.path));
       expect(paths.has('/repos/{owner}/{repo}')).toBe(true);
-      expect(paths.has('/user/repos')).toBe(true);
       expect(paths.has('/repos/{owner}/{repo}/issues')).toBe(true);
     });
 
     test('_filterToolsByResources with multiple resources', () => {
       const filtered = (discovery as any)._filterToolsByResources(toolsWithResources, ['repos', 'orgs']);
       
-      expect(filtered.length).toBe(4); // All tools have repos or orgs in path
+      expect(filtered.length).toBe(3); // /repos/..., /repos/.../issues, /orgs/... (NOT /user/repos)
     });
 
     test('_filterToolsByResources case insensitive', () => {
       const filtered = (discovery as any)._filterToolsByResources(toolsWithResources, ['REPOS', 'Orgs']);
       
-      expect(filtered.length).toBe(4);
+      expect(filtered.length).toBe(3);
     });
 
     test('_filterToolsByResources with no matches', () => {
@@ -508,20 +507,24 @@ describe('OCP Schema Discovery', () => {
 
     test('_filterToolsByResources exact match', () => {
       const tools = [
-        { name: 'listPaymentMethods', description: 'List payment methods', method: 'GET', path: '/v1/payment_methods', parameters: {} },
-        { name: 'createPaymentIntent', description: 'Create payment intent', method: 'POST', path: '/v1/payment_intents', parameters: {} },
-        { name: 'listPayments', description: 'List payments', method: 'GET', path: '/v1/payments', parameters: {} }
+        { name: 'listPaymentMethods', description: 'List payment methods', method: 'GET', path: '/payment_methods', parameters: {} },
+        { name: 'createPaymentIntent', description: 'Create payment intent', method: 'POST', path: '/payment_intents', parameters: {} },
+        { name: 'listPayments', description: 'List payments', method: 'GET', path: '/payments', parameters: {} }
       ];
       
-      // Filter for "payment" should only match "/v1/payments" (exact segment match)
-      // Should NOT match "payment_methods" or "payment_intents" (those are different segments)
+      // Filter for "payment" should not match any (no exact segment match)
       const filtered1 = (discovery as any)._filterToolsByResources(tools, ['payment']);
-      expect(filtered1.length).toBe(0); // "payment" doesn't exactly match any segment
+      expect(filtered1.length).toBe(0); // "payment" doesn't exactly match any first segment
       
-      // Filter for "payments" should match the exact segment
+      // Filter for "payments" should match the exact first segment
       const filtered2 = (discovery as any)._filterToolsByResources(tools, ['payments']);
       expect(filtered2.length).toBe(1);
-      expect(filtered2[0].path).toBe('/v1/payments');
+      expect(filtered2[0].path).toBe('/payments');
+      
+      // Filter for "payment_methods" should match
+      const filtered3 = (discovery as any)._filterToolsByResources(tools, ['payment_methods']);
+      expect(filtered3.length).toBe(1);
+      expect(filtered3[0].path).toBe('/payment_methods');
     });
 
     test('_filterToolsByResources with dots', () => {
@@ -555,10 +558,57 @@ describe('OCP Schema Discovery', () => {
       expect(filtered1.length).toBe(1);
       expect(filtered1[0].path).toBe('/repos/{owner}/{repo}');
       
-      // Filter for "repositories" should match the enterprise endpoint
+      // Filter for "repositories" should not match (first segment is "enterprises")
       const filtered2 = (discovery as any)._filterToolsByResources(tools, ['repositories']);
+      expect(filtered2.length).toBe(0);
+      
+      // Filter for "enterprises" should match the enterprise endpoint
+      const filtered3 = (discovery as any)._filterToolsByResources(tools, ['enterprises']);
+      expect(filtered3.length).toBe(1);
+      expect(filtered3[0].path.includes('/enterprises')).toBe(true);
+    });
+
+    test('_filterToolsByResources with path prefix', () => {
+      const tools = [
+        { name: 'listPayments', description: 'List payments', method: 'GET', path: '/v1/payments', parameters: {} },
+        { name: 'createCharge', description: 'Create charge', method: 'POST', path: '/v1/charges', parameters: {} },
+        { name: 'legacyPayment', description: 'Legacy payment', method: 'GET', path: '/v2/payments', parameters: {} }
+      ];
+      
+      // Filter for "payments" with /v1 prefix
+      const filtered1 = (discovery as any)._filterToolsByResources(tools, ['payments'], '/v1');
+      expect(filtered1.length).toBe(1);
+      expect(filtered1[0].path).toBe('/v1/payments');
+      
+      // Filter for "payments" with /v2 prefix
+      const filtered2 = (discovery as any)._filterToolsByResources(tools, ['payments'], '/v2');
       expect(filtered2.length).toBe(1);
-      expect(filtered2[0].path.includes('/repositories')).toBe(true);
+      expect(filtered2[0].path).toBe('/v2/payments');
+      
+      // Filter without prefix - no matches (first segment is "v1" or "v2")
+      const filtered3 = (discovery as any)._filterToolsByResources(tools, ['payments']);
+      expect(filtered3.length).toBe(0);
+    });
+
+    test('_filterToolsByResources first segment only', () => {
+      const tools = [
+        { name: 'listRepoIssues', description: 'List repo issues', method: 'GET', path: '/repos/{owner}/{repo}/issues', parameters: {} },
+        { name: 'listUserRepos', description: 'List user repos', method: 'GET', path: '/user/repos', parameters: {} }
+      ];
+      
+      // Filter for "repos" - should match /repos/... but NOT /user/repos (first segment is "user")
+      const filtered1 = (discovery as any)._filterToolsByResources(tools, ['repos']);
+      expect(filtered1.length).toBe(1);
+      expect(filtered1[0].path).toBe('/repos/{owner}/{repo}/issues');
+      
+      // Filter for "user" - should match /user/repos
+      const filtered2 = (discovery as any)._filterToolsByResources(tools, ['user']);
+      expect(filtered2.length).toBe(1);
+      expect(filtered2[0].path).toBe('/user/repos');
+      
+      // Filter for "issues" - should NOT match anything (issues is not first segment)
+      const filtered3 = (discovery as any)._filterToolsByResources(tools, ['issues']);
+      expect(filtered3.length).toBe(0);
     });
 
     test('discoverApi with includeResources parameter', async () => {
@@ -574,8 +624,8 @@ describe('OCP Schema Discovery', () => {
         ['repos']
       );
 
-      expect(apiSpec.tools.length).toBe(3);
-      expect(apiSpec.tools.every(tool => tool.path.toLowerCase().includes('repos'))).toBe(true);
+      expect(apiSpec.tools.length).toBe(2);
+      expect(apiSpec.tools.every(tool => tool.path.toLowerCase().startsWith('/repos'))).toBe(true);
     });
 
     test('discoverApi with multiple includeResources', async () => {
@@ -588,10 +638,10 @@ describe('OCP Schema Discovery', () => {
       const apiSpec = await discovery.discoverApi(
         'https://api.github.com/openapi.json',
         undefined,
-        ['repos', 'issues', 'orgs']
+        ['repos', 'orgs']
       );
 
-      expect(apiSpec.tools.length).toBe(4);
+      expect(apiSpec.tools.length).toBe(3);
     });
 
     test('discoverApi without includeResources returns all tools', async () => {

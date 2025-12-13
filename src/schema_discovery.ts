@@ -49,10 +49,11 @@ export class OCPSchemaDiscovery {
      * 
      * @param specUrl - URL to OpenAPI specification (JSON or YAML)
      * @param baseUrl - Optional override for API base URL
-     * @param includeResources - Optional list of resource names to filter tools by (case-insensitive path matching)
+     * @param includeResources - Optional list of resource names to filter tools by (case-insensitive, first resource segment matching)
+     * @param pathPrefix - Optional path prefix to strip before filtering (e.g., '/v1', '/api/v2')
      * @returns API specification with extracted tools
      */
-    async discoverApi(specUrl: string, baseUrl?: string, includeResources?: string[]): Promise<OCPAPISpec> {
+    async discoverApi(specUrl: string, baseUrl?: string, includeResources?: string[], pathPrefix?: string): Promise<OCPAPISpec> {
         // Check cache
         if (this.cache.has(specUrl)) {
             return this.cache.get(specUrl)!;
@@ -67,7 +68,7 @@ export class OCPSchemaDiscovery {
             
             // Apply resource filtering if specified (only on newly parsed specs)
             if (includeResources) {
-                const filteredTools = this._filterToolsByResources(apiSpec.tools, includeResources);
+                const filteredTools = this._filterToolsByResources(apiSpec.tools, includeResources, pathPrefix);
                 return {
                     base_url: apiSpec.base_url,
                     title: apiSpec.title,
@@ -360,9 +361,9 @@ export class OCPSchemaDiscovery {
     }
 
     /**
-     * Filter tools to only include those whose paths contain at least one matching resource name.
+     * Filter tools to only include those whose first resource segment matches includeResources.
      */
-    private _filterToolsByResources(tools: OCPTool[], includeResources: string[]): OCPTool[] {
+    private _filterToolsByResources(tools: OCPTool[], includeResources: string[], pathPrefix?: string): OCPTool[] {
         if (!includeResources || includeResources.length === 0) {
             return tools;
         }
@@ -371,15 +372,26 @@ export class OCPSchemaDiscovery {
         const normalizedResources = includeResources.map(r => r.toLowerCase());
 
         return tools.filter(tool => {
+            let path = tool.path;
+            
+            // Strip path prefix if provided
+            if (pathPrefix) {
+                const prefixLower = pathPrefix.toLowerCase();
+                const pathLower = path.toLowerCase();
+                if (pathLower.startsWith(prefixLower)) {
+                    path = path.substring(pathPrefix.length);
+                }
+            }
+            
             // Extract path segments by splitting on both '/' and '.'
-            const pathLower = tool.path.toLowerCase();
+            const pathLower = path.toLowerCase();
             // Replace dots with slashes for uniform splitting
             const pathNormalized = pathLower.replace(/\./g, '/');
             // Split by '/' and filter out empty segments and parameter placeholders
             const segments = pathNormalized.split('/').filter(seg => seg && !seg.startsWith('{'));
             
-            // Check if any segment exactly matches any of the includeResources
-            return segments.some(segment => normalizedResources.includes(segment));
+            // Check if the first segment matches any of the includeResources
+            return segments.length > 0 && normalizedResources.includes(segments[0]);
         });
     }
 
