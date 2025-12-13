@@ -371,15 +371,15 @@ export class OCPSchemaDiscovery {
         const normalizedResources = includeResources.map(r => r.toLowerCase());
 
         return tools.filter(tool => {
-            // Extract path segments and normalize to lowercase
+            // Extract path segments by splitting on both '/' and '.'
             const pathLower = tool.path.toLowerCase();
-            // Split path by '/' and filter out empty segments and parameter placeholders
-            const segments = pathLower.split('/').filter(seg => seg && !seg.startsWith('{'));
+            // Replace dots with slashes for uniform splitting
+            const pathNormalized = pathLower.replace(/\./g, '/');
+            // Split by '/' and filter out empty segments and parameter placeholders
+            const segments = pathNormalized.split('/').filter(seg => seg && !seg.startsWith('{'));
             
-            // Check if any segment contains any of the includeResources
-            return segments.some(segment => 
-                normalizedResources.some(resource => segment.includes(resource))
-            );
+            // Check if any segment exactly matches any of the includeResources
+            return segments.some(segment => normalizedResources.includes(segment));
         });
     }
 

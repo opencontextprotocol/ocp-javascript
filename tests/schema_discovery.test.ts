@@ -506,14 +506,59 @@ describe('OCP Schema Discovery', () => {
       expect(filtered).toEqual(toolsWithResources);
     });
 
-    test('_filterToolsByResources partial match', () => {
+    test('_filterToolsByResources exact match', () => {
       const tools = [
         { name: 'listPaymentMethods', description: 'List payment methods', method: 'GET', path: '/v1/payment_methods', parameters: {} },
-        { name: 'createPaymentIntent', description: 'Create payment intent', method: 'POST', path: '/v1/payment_intents', parameters: {} }
+        { name: 'createPaymentIntent', description: 'Create payment intent', method: 'POST', path: '/v1/payment_intents', parameters: {} },
+        { name: 'listPayments', description: 'List payments', method: 'GET', path: '/v1/payments', parameters: {} }
       ];
       
-      const filtered = (discovery as any)._filterToolsByResources(tools, ['payment']);
-      expect(filtered.length).toBe(2);
+      // Filter for "payment" should only match "/v1/payments" (exact segment match)
+      // Should NOT match "payment_methods" or "payment_intents" (those are different segments)
+      const filtered1 = (discovery as any)._filterToolsByResources(tools, ['payment']);
+      expect(filtered1.length).toBe(0); // "payment" doesn't exactly match any segment
+      
+      // Filter for "payments" should match the exact segment
+      const filtered2 = (discovery as any)._filterToolsByResources(tools, ['payments']);
+      expect(filtered2.length).toBe(1);
+      expect(filtered2[0].path).toBe('/v1/payments');
+    });
+
+    test('_filterToolsByResources with dots', () => {
+      const tools = [
+        { name: 'conversationsReplies', description: 'Get conversation replies', method: 'GET', path: '/conversations.replies', parameters: {} },
+        { name: 'conversationsHistory', description: 'Get conversation history', method: 'GET', path: '/conversations.history', parameters: {} },
+        { name: 'chatPostMessage', description: 'Post a message', method: 'POST', path: '/chat.postMessage', parameters: {} }
+      ];
+      
+      // Filter for "conversations" should match both conversation endpoints
+      const filtered1 = (discovery as any)._filterToolsByResources(tools, ['conversations']);
+      expect(filtered1.length).toBe(2);
+      expect(filtered1.every((tool: any) => tool.path.includes('conversations'))).toBe(true);
+      
+      // Filter for "chat" should match the chat endpoint
+      const filtered2 = (discovery as any)._filterToolsByResources(tools, ['chat']);
+      expect(filtered2.length).toBe(1);
+      expect(filtered2[0].path).toBe('/chat.postMessage');
+    });
+
+    test('_filterToolsByResources no substring match', () => {
+      const tools = [
+        { name: 'listRepos', description: 'List repos', method: 'GET', path: '/repos/{owner}/{repo}', parameters: {} },
+        { name: 'listRepositories', description: 'List enterprise repositories', method: 'GET', 
+          path: '/enterprises/{enterprise}/code-security/configurations/{config_id}/repositories', parameters: {} }
+      ];
+      
+      // Filter for "repos" should match "/repos/{owner}/{repo}"
+      // Should NOT match "/enterprises/.../repositories" (repos != repositories)
+      const filtered1 = (discovery as any)._filterToolsByResources(tools, ['repos']);
+      expect(filtered1.length).toBe(1);
+      expect(filtered1[0].path).toBe('/repos/{owner}/{repo}');
+      
+      // Filter for "repositories" should match the enterprise endpoint
+      const filtered2 = (discovery as any)._filterToolsByResources(tools, ['repositories']);
+      expect(filtered2.length).toBe(1);
+      expect(filtered2[0].path.includes('/repositories')).toBe(true);
     });
 
     test('discoverApi with includeResources parameter', async () => {
