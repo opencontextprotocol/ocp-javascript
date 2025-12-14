@@ -61,7 +61,7 @@ describe('OCP Registry', () => {
   describe('Registry Initialization', () => {
     test('init default url', () => {
       const registry = new OCPRegistry();
-      expect((registry as any).registryUrl).toBe('https://api.opencontextprotocol.io');
+      expect((registry as any).registryUrl).toBe('https://ocp.nallenscott.dev/api/v1');
     });
 
     test('init custom url', () => {

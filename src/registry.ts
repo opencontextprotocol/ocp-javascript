@@ -7,7 +7,7 @@
 import { OCPAPISpec, OCPTool } from './schema_discovery.js';
 import { RegistryUnavailable, APINotFound } from './errors.js';
 
-const DEFAULT_REGISTRY_URL = 'https://api.opencontextprotocol.io';
+const DEFAULT_REGISTRY_URL = 'https://ocp.nallenscott.dev/api/v1';
 const DEFAULT_TIMEOUT = 10000;
 const SEARCH_TIMEOUT = 5000;
 const DEFAULT_PER_PAGE = 10;
@@ -67,7 +67,7 @@ export class OCPRegistry {
      */
     async getApiSpec(name: string, baseUrl?: string): Promise<OCPAPISpec> {
         try {
-            const response = await fetch(`${this.registryUrl}/api/v1/registry/${name}`, {
+            const response = await fetch(`${this.registryUrl}/registry/${name}`, {
                 timeout: DEFAULT_TIMEOUT
             } as any);
             
@@ -118,7 +118,7 @@ export class OCPRegistry {
                 per_page: DEFAULT_PER_PAGE.toString()
             });
             
-            const url = `${this.registryUrl}/api/v1/search?${params.toString()}`;
+            const url = `${this.registryUrl}/search?${params.toString()}`;
             const response = await fetch(url, {
                 timeout: SEARCH_TIMEOUT
             } as any);
@@ -143,7 +143,7 @@ export class OCPRegistry {
      */
     async listApis(): Promise<string[]> {
         try {
-            const response = await fetch(`${this.registryUrl}/api/v1/registry`, {
+            const response = await fetch(`${this.registryUrl}/registry`, {
                 timeout: DEFAULT_TIMEOUT
             } as any);
             
