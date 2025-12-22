@@ -238,12 +238,17 @@ export class OCPAgent {
         apiName?: string,
         headers?: Record<string, string>
     ): Promise<OCPResponse> {
+        console.log('[OCP Agent] callTool called:', { toolName, apiName, parameters, hasHeaders: !!headers });
+        
         // Find the tool
         const tool = this.getTool(toolName, apiName);
         if (!tool) {
             const availableTools = this.listTools(apiName).map(t => t.name);
+            console.error('[OCP Agent] Tool not found:', { toolName, apiName, availableTools });
             throw new Error(`Tool '${toolName}' not found. Available tools: ${availableTools.join(', ')}`);
         }
+        
+        console.log('[OCP Agent] Found tool:', { name: tool.name, method: tool.method, path: tool.path });
 
         // Find the API spec for this tool
         let apiSpec: OCPAPISpec | undefined;
@@ -255,31 +260,55 @@ export class OCPAgent {
         }
 
         if (!apiSpec) {
+            console.error('[OCP Agent] API spec not found for tool:', toolName);
             throw new Error(`Could not find API spec for tool '${toolName}'`);
         }
+        
+        console.log('[OCP Agent] Found API spec:', { 
+            name: apiSpec.name, 
+            baseUrl: apiSpec.base_url,
+            hasRegisteredClient: apiSpec.name ? this.apiClients.has(apiSpec.name) : false
+        });
 
         // Validate parameters
         const validationErrors = this._validateParameters(tool, parameters);
         if (validationErrors.length > 0) {
+            console.error('[OCP Agent] Validation errors:', validationErrors);
             throw new Error(`Parameter validation failed: ${validationErrors.join(', ')}`);
         }
 
         // Determine HTTP client to use (priority: call_tool headers > registered headers > default)
         let client: OCPHTTPClient;
+        let clientType: string;
         if (headers) {
             // Per-call override: create temporary wrapped client
+            console.log('[OCP Agent] Using per-call headers client');
             const { _wrapApi } = await import('./http_client.js');
             client = _wrapApi(apiSpec.base_url, this.context, headers);
+            clientType = 'per-call-headers';
         } else if (apiSpec.name && this.apiClients.has(apiSpec.name)) {
             // Use registered client with headers
+            console.log('[OCP Agent] Using registered client with headers for:', apiSpec.name);
             client = this.apiClients.get(apiSpec.name)!;
+            clientType = 'registered-headers';
         } else {
             // Use default client (no auth)
+            console.log('[OCP Agent] Using default client (no auth)');
             client = this.httpClient;
+            clientType = 'default';
         }
 
         // Build request
         const [url, requestParams] = this._buildRequest(apiSpec, tool, parameters);
+        
+        console.log('[OCP Agent] Making request:', {
+            method: tool.method,
+            url,
+            clientType,
+            hasParams: !!requestParams.params,
+            hasBody: !!requestParams.json,
+            hasHeaders: !!requestParams.headers
+        });
 
         // Log the tool call
         this.context.addInteraction(
@@ -296,6 +325,11 @@ export class OCPAgent {
         // Make the request with OCP context enhancement
         try {
             const response = await client.request(tool.method, url, requestParams);
+            
+            console.log('[OCP Agent] Response:', {
+                status: response.status,
+                ok: response.ok
+            });
 
             // Log the result
             this.context.addInteraction(
