@@ -124,6 +124,28 @@ describe('OCP Agent', () => {
         'https://custom.test.com'
       );
     });
+
+    test('register api normalizes names', async () => {
+      const mockGetApiSpec = jest.spyOn(agent['registry'], 'getApiSpec');
+      mockGetApiSpec.mockResolvedValue(sampleApiSpec);
+
+      // Register with mixed case
+      const apiSpec = await agent.registerApi('GitHuB');
+      expect(agent.knownApis.has('github')).toBe(true);
+      expect(apiSpec.name).toBe('github');
+
+      // Can retrieve with any casing
+      expect(agent.listTools('GITHUB')).toEqual(agent.listTools('github'));
+      expect(agent.getTool('get_items', 'GitHub')).toBeDefined();
+      expect(agent.searchTools('items', 'gitHUB').length).toBeGreaterThan(0);
+
+      // Whitespace is stripped
+      await agent.registerApi('  stripe  ');
+      expect(agent.knownApis.has('stripe')).toBe(true);
+      expect(agent.knownApis.has('  stripe  ')).toBe(false);
+
+      mockGetApiSpec.mockRestore();
+    });
   });
 
   describe('List Tools', () => {

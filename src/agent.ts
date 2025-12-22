@@ -85,6 +85,9 @@ export class OCPAgent {
      * await agent.registerApi('my-api', 'https://api.example.com/openapi.json');
      */
     async registerApi(name: string, specUrl?: string, baseUrl?: string, headers?: Record<string, string>): Promise<OCPAPISpec> {
+        // Normalize name for case-insensitive matching
+        name = this._normalizeApiName(name);
+
         // Check memory first
         const existingSpec = this.knownApis.get(name);
         if (existingSpec) {
@@ -158,6 +161,7 @@ export class OCPAgent {
      */
     listTools(apiName?: string): OCPTool[] {
         if (apiName) {
+            apiName = this._normalizeApiName(apiName);
             const apiSpec = this.knownApis.get(apiName);
             if (!apiSpec) {
                 throw new Error(`Unknown API: ${apiName}`);
@@ -202,6 +206,7 @@ export class OCPAgent {
      */
     searchTools(query: string, apiName?: string): OCPTool[] {
         if (apiName) {
+            apiName = this._normalizeApiName(apiName);
             const apiSpec = this.knownApis.get(apiName);
             if (!apiSpec) {
                 return [];
@@ -430,5 +435,12 @@ export class OCPAgent {
      */
     updateGoal(goal: string, summary?: string): void {
         this.context.updateGoal(goal, summary);
+    }
+
+    /**
+     * Normalize API name for case-insensitive matching.
+     */
+    private _normalizeApiName(name: string): string {
+        return name.toLowerCase().trim();
     }
 }
