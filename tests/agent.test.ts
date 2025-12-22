@@ -400,4 +400,246 @@ describe('OCP Agent', () => {
       expect((agentWithRegistry['registry'] as any).registryUrl).toBe('https://custom-registry.com');
     });
   });
+
+  describe('Agent Authentication', () => {
+    // Helper to create fresh API spec for each test
+    const createAuthApiSpec = (): OCPAPISpec => ({
+      title: 'Auth API',
+      version: '1.0.0',
+      base_url: 'https://api.auth-test.com',
+      description: 'API requiring authentication',
+      tools: [
+        {
+          name: 'get_user',
+          description: 'Get user info',
+          method: 'GET',
+          path: '/user',
+          parameters: {},
+          response_schema: {},
+        },
+      ],
+      raw_spec: {},
+    });
+
+    const mockFetchResponse = () => {
+      const mockResponse = {
+        status: 200,
+        statusText: 'OK',
+        ok: true,
+        headers: new Headers(),
+        text: async () => '{}',
+      };
+      (global.fetch as jest.MockedFunction<typeof fetch>).mockResolvedValue(mockResponse as Response);
+    };
+
+    test('register api with headers', async () => {
+      const sampleApiSpec = createAuthApiSpec();
+      const mockGetApiSpec = jest.fn<(apiName: string, baseUrl?: string) => Promise<OCPAPISpec>>().mockResolvedValue(sampleApiSpec);
+      const mockRegistry = { getApiSpec: mockGetApiSpec };
+      agent['registry'] = mockRegistry as any;
+
+      // Register API with headers
+      const headers = { Authorization: 'Bearer token123' };
+      const result = await agent.registerApi('auth_api', undefined, undefined, headers);
+
+      // Verify wrapped client was stored
+      expect(agent.apiClients.has('auth_api')).toBe(true);
+
+      // Verify API spec was registered
+      expect(result).toEqual(sampleApiSpec);
+      expect(agent.knownApis.has('auth_api')).toBe(true);
+
+      // Verify name was set on spec
+      expect(result.name).toBe('auth_api');
+    });
+
+    test('register api without headers', async () => {
+      const sampleApiSpec = createAuthApiSpec();
+      const mockGetApiSpec = jest.fn<(apiName: string, baseUrl?: string) => Promise<OCPAPISpec>>().mockResolvedValue(sampleApiSpec);
+      const mockRegistry = { getApiSpec: mockGetApiSpec };
+      agent['registry'] = mockRegistry as any;
+
+      // Register API without headers
+      const result = await agent.registerApi('public_api');
+
+      // Verify no wrapped client was created
+      expect(agent.apiClients.has('public_api')).toBe(false);
+      expect(agent.apiClients.size).toBe(0);
+
+      // Verify API was still registered
+      expect(result).toEqual(sampleApiSpec);
+      expect(agent.knownApis.has('public_api')).toBe(true);
+    });
+
+    test('call tool with registered headers', async () => {
+      const sampleApiSpec = createAuthApiSpec();
+      const specWithName = { ...sampleApiSpec, name: 'auth_api' };
+      agent.knownApis.set('auth_api', specWithName);
+
+      // Create mock wrapped client
+      const mockWrappedClient = {
+        request: jest.fn<() => Promise<any>>().mockResolvedValue({
+          status: 200,
+          statusText: 'OK',
+          ok: true,
+          text: '{"user":"test"}',
+          json: async () => ({ user: 'test' }),
+        }),
+      };
+      agent.apiClients.set('auth_api', mockWrappedClient as any);
+
+      // Spy on default http client
+      const defaultRequestSpy = jest.spyOn(agent['httpClient'], 'request');
+
+      // Call tool
+      const response = await agent.callTool('get_user');
+
+      // Verify wrapped client was used (not default http_client)
+      expect(mockWrappedClient.request).toHaveBeenCalled();
+      expect(defaultRequestSpy).not.toHaveBeenCalled();
+      expect(response.status).toBe(200);
+    });
+
+    test('call tool without registered headers', async () => {
+      const sampleApiSpec = createAuthApiSpec();
+      const specWithName = { ...sampleApiSpec, name: 'public_api' };
+      agent.knownApis.set('public_api', specWithName);
+
+      // Mock default http client
+      const mockResponse = {
+        status: 200,
+        statusText: 'OK',
+        ok: true,
+        text: '{"data":"test"}',
+        json: async () => ({ data: 'test' }),
+      };
+      const defaultRequestSpy = jest.spyOn(agent['httpClient'], 'request').mockResolvedValue(mockResponse as any);
+
+      // Call tool
+      const response = await agent.callTool('get_user');
+
+      // Verify default http_client was used
+      expect(defaultRequestSpy).toHaveBeenCalled();
+      expect(response.status).toBe(200);
+    });
+
+    test('call tool with headers parameter', async () => {
+      const sampleApiSpec = createAuthApiSpec();
+      const specWithName = { ...sampleApiSpec, name: 'api' };
+      agent.knownApis.set('api', specWithName);
+
+      // Setup registered client
+      const registeredClient = {
+        request: jest.fn<() => Promise<any>>().mockResolvedValue({
+          status: 200,
+          statusText: 'OK',
+          ok: true,
+          text: async () => '{}',
+        }),
+      };
+      agent.apiClients.set('api', registeredClient as any);
+
+      // Mock fetch for per-call headers
+      mockFetchResponse();
+
+      // Call tool with per-call headers
+      const callHeaders = { Authorization: 'Bearer different_token' };
+      const response = await agent.callTool('get_user', {}, undefined, callHeaders);
+
+      // Verify registered client was NOT used (per-call headers take priority)
+      expect(registeredClient.request).not.toHaveBeenCalled();
+      expect(response.status).toBe(200);
+    });
+
+    test('call tool client priority', async () => {
+      const sampleApiSpec = createAuthApiSpec();
+      const specWithName = { ...sampleApiSpec, name: 'api' };
+      agent.knownApis.set('api', specWithName);
+
+      // Setup registered client
+      const registeredClient = {
+        request: jest.fn<() => Promise<any>>().mockResolvedValue({
+          status: 200,
+          statusText: 'OK',
+          ok: true,
+          text: async () => '{}',
+        }),
+      };
+      agent.apiClients.set('api', registeredClient as any);
+
+      const defaultRequestSpy = jest.spyOn(agent['httpClient'], 'request').mockResolvedValue({
+        status: 200,
+        statusText: 'OK',
+        ok: true,
+        text: async () => '{}',
+      } as any);
+
+      // Mock fetch for per-call headers
+      mockFetchResponse();
+
+      // Test 1: With call_tool headers (highest priority)
+      await agent.callTool('get_user', {}, undefined, { Authorization: 'Bearer call' });
+      expect(registeredClient.request).not.toHaveBeenCalled();
+      expect(defaultRequestSpy).not.toHaveBeenCalled();
+
+      // Test 2: Without call_tool headers, with registered headers (medium priority)
+      await agent.callTool('get_user');
+      expect(registeredClient.request).toHaveBeenCalled();
+      expect(defaultRequestSpy).not.toHaveBeenCalled();
+
+      registeredClient.request.mockClear();
+      defaultRequestSpy.mockClear();
+
+      // Test 3: Without any headers (default client, lowest priority)
+      agent.apiClients.delete('api');
+      await agent.callTool('get_user');
+      expect(registeredClient.request).not.toHaveBeenCalled();
+      expect(defaultRequestSpy).toHaveBeenCalled();
+    });
+
+    test('api spec name field set', async () => {
+      const sampleApiSpec = createAuthApiSpec();
+      const mockGetApiSpec = jest.fn<(apiName: string, baseUrl?: string) => Promise<OCPAPISpec>>().mockResolvedValue(sampleApiSpec);
+      const mockRegistry = { getApiSpec: mockGetApiSpec };
+      agent['registry'] = mockRegistry as any;
+
+      // Initially spec has no name
+      expect(sampleApiSpec.name).toBeUndefined();
+
+      // Register API
+      const result = await agent.registerApi('my_api');
+
+      // Verify name was set
+      expect(result.name).toBe('my_api');
+      expect(agent.knownApis.get('my_api')?.name).toBe('my_api');
+    });
+
+    test('register api with different auth types', async () => {
+      const mockGetApiSpec = jest.fn<(apiName: string, baseUrl?: string) => Promise<OCPAPISpec>>()
+        .mockImplementation(() => Promise.resolve(createAuthApiSpec()));
+      const mockRegistry = { getApiSpec: mockGetApiSpec };
+      agent['registry'] = mockRegistry as any;
+
+      // Test Bearer token
+      await agent.registerApi('api1', undefined, undefined, { Authorization: 'Bearer jwt_token' });
+      expect(agent.apiClients.has('api1')).toBe(true);
+
+      // Test API key
+      await agent.registerApi('api2', undefined, undefined, { 'X-API-Key': 'secret_key' });
+      expect(agent.apiClients.has('api2')).toBe(true);
+
+      // Test Basic auth
+      await agent.registerApi('api3', undefined, undefined, { Authorization: 'Basic dXNlcjpwYXNz' });
+      expect(agent.apiClients.has('api3')).toBe(true);
+
+      // Test multiple headers
+      const multiHeaders = {
+        Authorization: 'Bearer token',
+        'X-Custom-Header': 'value',
+      };
+      await agent.registerApi('api4', undefined, undefined, multiHeaders);
+      expect(agent.apiClients.has('api4')).toBe(true);
+    });
+  });
 });
+

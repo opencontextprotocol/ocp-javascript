@@ -3,7 +3,7 @@
  */
 
 import { describe, test, expect, beforeEach, jest } from '@jest/globals';
-import { OCPHTTPClient, wrapApi } from '../src/http_client.js';
+import { OCPHTTPClient, _wrapApi } from '../src/http_client.js';
 import { AgentContext } from '../src/context.js';
 import { createOCPHeaders } from '../src/headers.js';
 
@@ -276,32 +276,32 @@ describe('Wrap API', () => {
   });
 
   test('wrap api basic', () => {
-    const apiClient = wrapApi('https://api.example.com', context);
+    const apiClient = _wrapApi('https://api.example.com', context);
 
     expect(apiClient).toBeDefined();
     expect(apiClient.request).toBeDefined();
   });
 
   test('wrap api with auth token', () => {
-    const apiClient = wrapApi('https://api.github.com', context, { 'Authorization': 'token ghp_123456' });
+    const apiClient = _wrapApi('https://api.github.com', context, { 'Authorization': 'token ghp_123456' });
 
     expect(apiClient).toBeDefined();
   });
 
   test('wrap api with bearer token', () => {
-    const apiClient = wrapApi('https://api.example.com', context, { 'Authorization': 'Bearer jwt_token_here' });
+    const apiClient = _wrapApi('https://api.example.com', context, { 'Authorization': 'Bearer jwt_token_here' });
 
     expect(apiClient).toBeDefined();
   });
 
   test('wrap api with basic auth', () => {
-    const apiClient = wrapApi('https://api.example.com', context, { 'Authorization': 'Basic dXNlcjpwYXNz' });
+    const apiClient = _wrapApi('https://api.example.com', context, { 'Authorization': 'Basic dXNlcjpwYXNz' });
 
     expect(apiClient).toBeDefined();
   });
 
   test('wrap api with plain token', () => {
-    const apiClient = wrapApi('https://api.example.com', context, { 'Authorization': 'token abc123def456' });
+    const apiClient = _wrapApi('https://api.example.com', context, { 'Authorization': 'token abc123def456' });
 
     expect(apiClient).toBeDefined();
   });
@@ -312,19 +312,19 @@ describe('Wrap API', () => {
       'Accept': 'application/vnd.api+json',
     };
 
-    const apiClient = wrapApi('https://api.example.com', context, customHeaders);
+    const apiClient = _wrapApi('https://api.example.com', context, customHeaders);
 
     expect(apiClient).toBeDefined();
   });
 
   test('wrap api base url normalization', () => {
     // Test trailing slash removal - this is implementation dependent
-    const apiClient = wrapApi('https://api.example.com/', context);
+    const apiClient = _wrapApi('https://api.example.com/', context);
     expect(apiClient).toBeDefined();
   });
 
   test('wrap api relative url handling', async () => {
-    const apiClient = wrapApi('https://api.example.com', context);
+    const apiClient = _wrapApi('https://api.example.com', context);
 
     const mockResponse = {
       status: 200,
@@ -345,7 +345,7 @@ describe('Wrap API', () => {
   });
 
   test('wrap api absolute url handling', async () => {
-    const apiClient = wrapApi('https://api.example.com', context);
+    const apiClient = _wrapApi('https://api.example.com', context);
 
     const mockResponse = {
       status: 200,

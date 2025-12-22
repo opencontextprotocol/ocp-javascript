@@ -65,8 +65,7 @@ export { OCPRegistry } from './registry.js';
 // HTTP Client
 export {
     OCPHTTPClient,
-    type OCPResponse,
-    wrapApi
+    type OCPResponse
 } from './http_client.js';
 
 // Agent

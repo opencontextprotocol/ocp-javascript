@@ -30,6 +30,7 @@ export interface OCPAPISpec {
     description: string;
     tools: OCPTool[];
     raw_spec: Record<string, any>;
+    name?: string;
 }
 
 /**

@@ -31,6 +31,7 @@ export class OCPAgent {
     discovery: OCPSchemaDiscovery;
     registry: OCPRegistry;
     knownApis: Map<string, OCPAPISpec>;
+    apiClients: Map<string, OCPHTTPClient>;
     httpClient: OCPHTTPClient;
     storage: OCPStorage | null;
 
@@ -61,6 +62,7 @@ export class OCPAgent {
         this.discovery = new OCPSchemaDiscovery();
         this.registry = new OCPRegistry(registryUrl);
         this.knownApis = new Map();
+        this.apiClients = new Map();
         this.httpClient = new OCPHTTPClient(this.context);
         this.storage = enableCache ? new OCPStorage() : null;
     }
@@ -71,6 +73,7 @@ export class OCPAgent {
      * @param name - Human-readable name for the API or registry API name
      * @param specUrl - URL to OpenAPI specification (optional if using registry lookup)
      * @param baseUrl - Optional override for API base URL
+     * @param headers - Optional headers for authenticated requests to this API
      * @returns Discovered API specification with available tools
      * 
      * @example
@@ -81,7 +84,7 @@ export class OCPAgent {
      * // Direct OpenAPI discovery
      * await agent.registerApi('my-api', 'https://api.example.com/openapi.json');
      */
-    async registerApi(name: string, specUrl?: string, baseUrl?: string): Promise<OCPAPISpec> {
+    async registerApi(name: string, specUrl?: string, baseUrl?: string, headers?: Record<string, string>): Promise<OCPAPISpec> {
         // Check memory first
         const existingSpec = this.knownApis.get(name);
         if (existingSpec) {
@@ -112,8 +115,15 @@ export class OCPAgent {
             source = `${REGISTRY_SOURCE_PREFIX}:${name}`;
         }
 
-        // Store API spec in memory
+        // Store API spec in memory and set name
+        apiSpec.name = name;
         this.knownApis.set(name, apiSpec);
+
+        // Create wrapped client if headers provided
+        if (headers) {
+            const { _wrapApi } = await import('./http_client.js');
+            this.apiClients.set(name, _wrapApi(apiSpec.base_url, this.context, headers));
+        }
 
         // Cache to disk if storage enabled
         if (this.storage) {
@@ -214,12 +224,14 @@ export class OCPAgent {
      * @param toolName - Name of the tool to call
      * @param parameters - Parameters for the tool call
      * @param apiName - Optional API name if tool name is ambiguous
+     * @param headers - Optional headers for this specific request (overrides registered headers)
      * @returns HTTP response from the API call
      */
     async callTool(
         toolName: string,
         parameters: Record<string, any> = {},
-        apiName?: string
+        apiName?: string,
+        headers?: Record<string, string>
     ): Promise<OCPResponse> {
         // Find the tool
         const tool = this.getTool(toolName, apiName);
@@ -247,6 +259,20 @@ export class OCPAgent {
             throw new Error(`Parameter validation failed: ${validationErrors.join(', ')}`);
         }
 
+        // Determine HTTP client to use (priority: call_tool headers > registered headers > default)
+        let client: OCPHTTPClient;
+        if (headers) {
+            // Per-call override: create temporary wrapped client
+            const { _wrapApi } = await import('./http_client.js');
+            client = _wrapApi(apiSpec.base_url, this.context, headers);
+        } else if (apiSpec.name && this.apiClients.has(apiSpec.name)) {
+            // Use registered client with headers
+            client = this.apiClients.get(apiSpec.name)!;
+        } else {
+            // Use default client (no auth)
+            client = this.httpClient;
+        }
+
         // Build request
         const [url, requestParams] = this._buildRequest(apiSpec, tool, parameters);
 
@@ -264,7 +290,7 @@ export class OCPAgent {
 
         // Make the request with OCP context enhancement
         try {
-            const response = await this.httpClient.request(tool.method, url, requestParams);
+            const response = await client.request(tool.method, url, requestParams);
 
             // Log the result
             this.context.addInteraction(

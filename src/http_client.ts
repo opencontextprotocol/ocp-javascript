@@ -221,14 +221,14 @@ export class OCPHTTPClient {
 }
 
 /**
- * Create API-specific HTTP client.
+ * Create API-specific HTTP client (internal use only).
  * 
  * @param baseUrl - API base URL
  * @param context - Agent context
  * @param headers - Optional headers to include in all requests
  * @returns Configured HTTP client
  */
-export function wrapApi(baseUrl: string, context: AgentContext, headers?: Record<string, string>): OCPHTTPClient {
+export function _wrapApi(baseUrl: string, context: AgentContext, headers?: Record<string, string>): OCPHTTPClient {
     const client = new OCPHTTPClient(context, true, baseUrl);
     
     // Override request method to add additional headers if provided
