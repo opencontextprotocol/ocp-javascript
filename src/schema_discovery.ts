@@ -193,8 +193,7 @@ export class OCPSchemaDiscovery {
             return null;
         }
 
-        const summary = operation.summary || '';
-        const description = operation.description || summary || `${method} ${path}`;
+        const description = operation.summary || operation.description || 'No description provided';
         const tags = operation.tags || [];
 
         // Parse parameters

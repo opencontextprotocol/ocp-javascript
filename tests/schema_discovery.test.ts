@@ -129,7 +129,7 @@ describe('OCP Schema Discovery', () => {
       expect(getUsers).toBeDefined();
       expect(getUsers!.method).toBe('GET');
       expect(getUsers!.path).toBe('/users');
-      expect(getUsers!.description).toBe('Get a list of all users');
+      expect(getUsers!.description).toBe('List users');
       expect(getUsers!.parameters['limit']).toBeDefined();
       expect(getUsers!.parameters['limit'].type).toBe('integer');
       expect(getUsers!.parameters['limit'].location).toBe('query');
