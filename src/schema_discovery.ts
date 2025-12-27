@@ -89,7 +89,8 @@ export class OCPSchemaDiscovery {
     }
 
     /**
-     * Fetch OpenAPI specification from URL and resolve $refs.
+     * Fetch OpenAPI specification from URL without resolving $refs.
+     * References are resolved lazily during tool creation.
      */
     private async _fetchSpec(specUrl: string): Promise<Record<string, any>> {
         try {
@@ -99,10 +100,7 @@ export class OCPSchemaDiscovery {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
             
-            const specData = await response.json() as Record<string, any>;
-            
-            // Resolve all internal $ref references
-            return this._resolveRefs(specData);
+            return await response.json() as Record<string, any>;
             
         } catch (error) {
             throw new SchemaDiscoveryError(
@@ -112,17 +110,19 @@ export class OCPSchemaDiscovery {
     }
 
     /**
-     * Recursively resolve $ref references in OpenAPI spec.
+     * Recursively resolve $ref references in OpenAPI spec with memoization.
      * 
      * @param obj - Current object being processed (object, array, or primitive)
      * @param root - Root spec document for looking up references
      * @param resolutionStack - Stack of refs currently being resolved (for circular detection)
+     * @param memo - Memoization cache to store resolved references
      * @returns Object with all resolvable $refs replaced by their definitions
      */
     private _resolveRefs(
         obj: any,
         root?: Record<string, any>,
-        resolutionStack: string[] = []
+        resolutionStack: string[] = [],
+        memo: Record<string, any> = {}
     ): any {
         // Initialize on first call
         if (root === undefined) {
@@ -140,10 +140,17 @@ export class OCPSchemaDiscovery {
                     return obj;
                 }
                 
+                // Check memo cache first
+                if (refPath in memo) {
+                    return memo[refPath];
+                }
+                
                 // Check for circular reference
                 if (resolutionStack.includes(refPath)) {
                     // Return a placeholder to break the cycle
-                    return { type: 'object', description: 'Circular reference' };
+                    const placeholder = { type: 'object', description: 'Circular reference' };
+                    memo[refPath] = placeholder;
+                    return placeholder;
                 }
                 
                 // Resolve the reference
@@ -152,11 +159,15 @@ export class OCPSchemaDiscovery {
                     if (resolved !== null) {
                         // Recursively resolve the resolved object with updated stack
                         const newStack = [...resolutionStack, refPath];
-                        return this._resolveRefs(resolved, root, newStack);
+                        const resolvedObj = this._resolveRefs(resolved, root, newStack, memo);
+                        memo[refPath] = resolvedObj;
+                        return resolvedObj;
                     }
                 } catch {
                     // If lookup fails, return a placeholder
-                    return { type: 'object', description: 'Unresolved reference' };
+                    const placeholder = { type: 'object', description: 'Unresolved reference' };
+                    memo[refPath] = placeholder;
+                    return placeholder;
                 }
                 
                 return obj;
@@ -165,14 +176,14 @@ export class OCPSchemaDiscovery {
             // Not a $ref, recursively process all values
             const result: Record<string, any> = {};
             for (const [key, value] of Object.entries(obj)) {
-                result[key] = this._resolveRefs(value, root, resolutionStack);
+                result[key] = this._resolveRefs(value, root, resolutionStack, memo);
             }
             return result;
         }
         
         // Handle array types
         if (Array.isArray(obj)) {
-            return obj.map(item => this._resolveRefs(item, root, resolutionStack));
+            return obj.map(item => this._resolveRefs(item, root, resolutionStack, memo));
         }
         
         // Primitives pass through unchanged
@@ -208,9 +219,12 @@ export class OCPSchemaDiscovery {
     }
 
     /**
-     * Parse OpenAPI specification and extract tools.
+     * Parse OpenAPI specification and extract tools with lazy $ref resolution.
      */
     private _parseOpenApiSpec(spec: Record<string, any>, baseUrlOverride?: string): OCPAPISpec {
+        // Initialize memoization cache for lazy $ref resolution
+        const memoCache: Record<string, any> = {};
+        
         // Extract API info
         const info = spec.info || {};
         const title = info.title || 'Unknown API';
@@ -238,7 +252,7 @@ export class OCPSchemaDiscovery {
                     continue;
                 }
 
-                const tool = this._createToolFromOperation(path, method, operation);
+                const tool = this._createToolFromOperation(path, method, operation, spec, memoCache);
                 if (tool) {
                     tools.push(tool);
                 }
@@ -258,7 +272,13 @@ export class OCPSchemaDiscovery {
     /**
      * Create tool definition from OpenAPI operation.
      */
-    private _createToolFromOperation(path: string, method: string, operation: Record<string, any>): OCPTool | null {
+    private _createToolFromOperation(
+        path: string, 
+        method: string, 
+        operation: Record<string, any>,
+        specData: Record<string, any>,
+        memoCache: Record<string, any>
+    ): OCPTool | null {
         if (!operation || typeof operation !== 'object') {
             return null;
         }
@@ -296,14 +316,16 @@ export class OCPSchemaDiscovery {
         const tags = operation.tags || [];
 
         // Parse parameters
-        const parameters = this._parseParameters(operation.parameters || []);
+        const parameters = this._parseParameters(operation.parameters || [], specData, memoCache);
 
-        // Parse request body
-        const bodyParams = this._parseRequestBody(operation.requestBody);
-        Object.assign(parameters, bodyParams);
+        // Add request body parameters for POST/PUT/PATCH
+        if (['POST', 'PUT', 'PATCH'].includes(method.toUpperCase()) && operation.requestBody) {
+            const bodyParams = this._parseRequestBody(operation.requestBody, specData, memoCache);
+            Object.assign(parameters, bodyParams);
+        }
 
         // Parse response schema
-        const responseSchema = this._parseResponses(operation.responses || {});
+        const responseSchema = this._parseResponses(operation.responses || {}, specData, memoCache);
 
         return {
             name: toolName,
@@ -371,9 +393,13 @@ export class OCPSchemaDiscovery {
     }
 
     /**
-     * Parse OpenAPI parameters.
+     * Parse OpenAPI parameters with lazy $ref resolution.
      */
-    private _parseParameters(parameters: any[]): Record<string, any> {
+    private _parseParameters(
+        parameters: any[], 
+        specData: Record<string, any>,
+        memoCache: Record<string, any>
+    ): Record<string, any> {
         const result: Record<string, any> = {};
 
         for (const param of parameters) {
@@ -382,22 +408,41 @@ export class OCPSchemaDiscovery {
             const name = param.name;
             if (!name) continue;
 
-            result[name] = {
-                type: param.schema?.type || 'string',
+            const paramSchema: Record<string, any> = {
                 description: param.description || '',
                 required: param.required || false,
                 location: param.in || 'query',
-                schema: param.schema || {}
+                type: 'string'  // Default type
             };
+
+            // Extract type from schema
+            const schema = param.schema || {};
+            if (schema) {
+                // Resolve any $refs in the parameter schema
+                const resolvedSchema = this._resolveRefs(schema, specData, [], memoCache);
+                paramSchema.type = resolvedSchema.type || 'string';
+                if ('enum' in resolvedSchema) {
+                    paramSchema.enum = resolvedSchema.enum;
+                }
+                if ('format' in resolvedSchema) {
+                    paramSchema.format = resolvedSchema.format;
+                }
+            }
+
+            result[name] = paramSchema;
         }
 
         return result;
     }
 
     /**
-     * Parse OpenAPI request body.
+     * Parse OpenAPI request body with lazy $ref resolution.
      */
-    private _parseRequestBody(requestBody: any): Record<string, any> {
+    private _parseRequestBody(
+        requestBody: any,
+        specData: Record<string, any>,
+        memoCache: Record<string, any>
+    ): Record<string, any> {
         if (!requestBody || typeof requestBody !== 'object') {
             return {};
         }
@@ -409,32 +454,46 @@ export class OCPSchemaDiscovery {
             return {};
         }
 
-        const schema = jsonContent.schema;
-        const properties = schema.properties || {};
-        const required = schema.required || [];
+        // Resolve the schema if it contains $refs
+        const schema = this._resolveRefs(jsonContent.schema, specData, [], memoCache);
         
-        const result: Record<string, any> = {};
-
-        for (const [name, propSchema] of Object.entries(properties)) {
-            if (typeof propSchema !== 'object' || propSchema === null) continue;
+        // Handle object schemas
+        if (schema.type === 'object') {
+            const properties = schema.properties || {};
+            const required = schema.required || [];
             
-            const prop = propSchema as Record<string, any>;
-            result[name] = {
-                type: prop.type || 'string',
-                description: prop.description || '',
-                required: required.includes(name),
-                location: 'body',
-                schema: prop
-            };
+            const result: Record<string, any> = {};
+
+            for (const [name, propSchema] of Object.entries(properties)) {
+                if (typeof propSchema !== 'object' || propSchema === null) continue;
+                
+                const prop = propSchema as Record<string, any>;
+                result[name] = {
+                    description: prop.description || '',
+                    required: required.includes(name),
+                    location: 'body',
+                    type: prop.type || 'string'
+                };
+                
+                if ('enum' in prop) {
+                    result[name].enum = prop.enum;
+                }
+            }
+
+            return result;
         }
 
-        return result;
+        return {};
     }
 
     /**
-     * Parse OpenAPI responses.
+     * Parse OpenAPI responses with lazy $ref resolution.
      */
-    private _parseResponses(responses: Record<string, any>): Record<string, any> | undefined {
+    private _parseResponses(
+        responses: Record<string, any>,
+        specData: Record<string, any>,
+        memoCache: Record<string, any>
+    ): Record<string, any> | undefined {
         // Find first 2xx response
         for (const [statusCode, response] of Object.entries(responses)) {
             if (statusCode.startsWith('2') && typeof response === 'object' && response !== null) {
@@ -442,7 +501,8 @@ export class OCPSchemaDiscovery {
                 const jsonContent = content['application/json'];
                 
                 if (jsonContent && jsonContent.schema) {
-                    return jsonContent.schema;
+                    // Resolve the schema if it contains $refs
+                    return this._resolveRefs(jsonContent.schema, specData, [], memoCache);
                 }
             }
         }
