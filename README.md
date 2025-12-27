@@ -54,10 +54,10 @@ const response = await githubClient.get('/user');
 ### OCPAgent
 
 ```typescript
-const agent = new OCPAgent(agentType, user?, workspace?, agentGoal?, registryUrl?);
-await agent.registerApi(name, specUrl?, baseUrl?);
+const agent = new OCPAgent(agentType, user?, workspace?, agentGoal?, registryUrl?, enableCache?);
+await agent.registerApi(name, specUrl?, baseUrl?, headers?);
 agent.listTools(apiName?);
-await agent.callTool(toolName, parameters);
+await agent.callTool(toolName, parameters?, apiName?);
 ```
 
 ### AgentContext
