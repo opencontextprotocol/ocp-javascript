@@ -198,6 +198,139 @@ describe('OCP Schema Discovery', () => {
         discovery.discoverApi('https://api.example.com/openapi.json')
       ).rejects.toThrow('Network error');
     });
+
+    test('discover api with refs', async () => {
+      const openApiSpecWithRefs = {
+        openapi: '3.0.0',
+        info: { title: 'Test API', version: '1.0.0' },
+        servers: [{ url: 'https://api.example.com' }],
+        paths: {
+          '/queue': {
+            post: {
+              operationId: 'updateQueue',
+              summary: 'Update queue',
+              responses: {
+                '200': {
+                  description: 'Queue updated',
+                  content: {
+                    'application/json': {
+                      schema: {
+                        $ref: '#/components/schemas/Queue',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            Queue: {
+              type: 'object',
+              properties: {
+                sid: { type: 'string' },
+                friendly_name: { type: 'string' },
+                current_size: { type: 'integer' },
+              },
+            },
+          },
+        },
+      };
+
+      (global.fetch as jest.MockedFunction<typeof fetch>).mockResolvedValueOnce({
+        ok: true,
+        json: async () => openApiSpecWithRefs,
+      } as Response);
+
+      const apiSpec = await discovery.discoverApi('https://api.example.com/openapi.json');
+
+      // Should have one tool
+      expect(apiSpec.tools.length).toBe(1);
+      const tool = apiSpec.tools[0];
+
+      // Verify the $ref was resolved
+      expect(tool.name).toBe('updateQueue');
+      expect(tool.response_schema).toBeDefined();
+      expect(tool.response_schema?.type).toBe('object');
+      expect(tool.response_schema?.properties).toBeDefined();
+      expect(tool.response_schema?.properties?.sid).toBeDefined();
+      expect(tool.response_schema?.properties?.friendly_name).toBeDefined();
+      expect(tool.response_schema?.properties?.current_size).toBeDefined();
+
+      // Should NOT contain $ref anymore
+      expect(JSON.stringify(tool.response_schema)).not.toContain('$ref');
+    });
+
+    test('discover api with circular refs', async () => {
+      const openApiSpecWithCircularRefs = {
+        openapi: '3.0.0',
+        info: { title: 'Test API', version: '1.0.0' },
+        servers: [{ url: 'https://api.example.com' }],
+        paths: {
+          '/node': {
+            get: {
+              operationId: 'getNode',
+              summary: 'Get node',
+              responses: {
+                '200': {
+                  description: 'Node retrieved',
+                  content: {
+                    'application/json': {
+                      schema: {
+                        $ref: '#/components/schemas/Node',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            Node: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                children: {
+                  type: 'array',
+                  items: {
+                    $ref: '#/components/schemas/Node',
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+
+      (global.fetch as jest.MockedFunction<typeof fetch>).mockResolvedValueOnce({
+        ok: true,
+        json: async () => openApiSpecWithCircularRefs,
+      } as Response);
+
+      // Should not raise an error
+      const apiSpec = await discovery.discoverApi('https://api.example.com/openapi.json');
+
+      // Should have one tool
+      expect(apiSpec.tools.length).toBe(1);
+      const tool = apiSpec.tools[0];
+
+      // Verify the response schema exists and has the expected structure
+      expect(tool.response_schema).toBeDefined();
+      expect(tool.response_schema?.type).toBe('object');
+      expect(tool.response_schema?.properties).toBeDefined();
+      expect(tool.response_schema?.properties?.id).toBeDefined();
+      expect(tool.response_schema?.properties?.children).toBeDefined();
+
+      // The circular ref in children.items should be replaced with a placeholder
+      const childrenSchema = tool.response_schema?.properties?.children;
+      expect(childrenSchema?.type).toBe('array');
+      expect(childrenSchema?.items).toBeDefined();
+      // The circular ref should be broken with a placeholder
+      expect(childrenSchema?.items?.description).toBe('Circular reference');
+    });
   });
 
   describe('Search Tools', () => {

@@ -89,7 +89,7 @@ export class OCPSchemaDiscovery {
     }
 
     /**
-     * Fetch OpenAPI specification from URL.
+     * Fetch OpenAPI specification from URL and resolve $refs.
      */
     private async _fetchSpec(specUrl: string): Promise<Record<string, any>> {
         try {
@@ -99,13 +99,112 @@ export class OCPSchemaDiscovery {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
             
-            return await response.json() as Record<string, any>;
+            const specData = await response.json() as Record<string, any>;
+            
+            // Resolve all internal $ref references
+            return this._resolveRefs(specData);
             
         } catch (error) {
             throw new SchemaDiscoveryError(
                 `Failed to fetch OpenAPI spec from ${specUrl}: ${error instanceof Error ? error.message : String(error)}`
             );
         }
+    }
+
+    /**
+     * Recursively resolve $ref references in OpenAPI spec.
+     * 
+     * @param obj - Current object being processed (object, array, or primitive)
+     * @param root - Root spec document for looking up references
+     * @param resolutionStack - Stack of refs currently being resolved (for circular detection)
+     * @returns Object with all resolvable $refs replaced by their definitions
+     */
+    private _resolveRefs(
+        obj: any,
+        root?: Record<string, any>,
+        resolutionStack: string[] = []
+    ): any {
+        // Initialize on first call
+        if (root === undefined) {
+            root = obj;
+        }
+
+        // Handle object types
+        if (obj !== null && typeof obj === 'object' && !Array.isArray(obj)) {
+            // Check if this is a $ref
+            if ('$ref' in obj && Object.keys(obj).length === 1) {
+                const refPath = obj.$ref as string;
+                
+                // Only handle internal refs (start with #/)
+                if (!refPath.startsWith('#/')) {
+                    return obj;
+                }
+                
+                // Check for circular reference
+                if (resolutionStack.includes(refPath)) {
+                    // Return a placeholder to break the cycle
+                    return { type: 'object', description: 'Circular reference' };
+                }
+                
+                // Resolve the reference
+                try {
+                    const resolved = this._lookupRef(root!, refPath);
+                    if (resolved !== null) {
+                        // Recursively resolve the resolved object with updated stack
+                        const newStack = [...resolutionStack, refPath];
+                        return this._resolveRefs(resolved, root, newStack);
+                    }
+                } catch {
+                    // If lookup fails, return a placeholder
+                    return { type: 'object', description: 'Unresolved reference' };
+                }
+                
+                return obj;
+            }
+            
+            // Not a $ref, recursively process all values
+            const result: Record<string, any> = {};
+            for (const [key, value] of Object.entries(obj)) {
+                result[key] = this._resolveRefs(value, root, resolutionStack);
+            }
+            return result;
+        }
+        
+        // Handle array types
+        if (Array.isArray(obj)) {
+            return obj.map(item => this._resolveRefs(item, root, resolutionStack));
+        }
+        
+        // Primitives pass through unchanged
+        return obj;
+    }
+
+    /**
+     * Look up a reference path in the spec document.
+     * 
+     * @param root - Root spec document
+     * @param refPath - Reference path like '#/components/schemas/User'
+     * @returns The referenced object, or null if not found
+     */
+    private _lookupRef(root: Record<string, any>, refPath: string): any {
+        // Remove the leading '#/' and split by '/'
+        if (!refPath.startsWith('#/')) {
+            return null;
+        }
+        
+        const pathParts = refPath.substring(2).split('/');
+        
+        // Navigate through the spec
+        let current: any = root;
+        for (const part of pathParts) {
+            if (current !== null && typeof current === 'object' && part in current) {
+                current = current[part];
+            } else {
+                return null;
+            }
+        }
+        
+        return current;
     }
 
     /**
