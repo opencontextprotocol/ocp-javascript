@@ -110,19 +110,21 @@ export class OCPSchemaDiscovery {
     }
 
     /**
-     * Recursively resolve $ref references in OpenAPI spec with memoization.
+     * Recursively resolve $ref references in OpenAPI spec with polymorphic keyword handling.
      * 
      * @param obj - Current object being processed (object, array, or primitive)
      * @param root - Root spec document for looking up references
      * @param resolutionStack - Stack of refs currently being resolved (for circular detection)
      * @param memo - Memoization cache to store resolved references
+     * @param insidePolymorphicKeyword - True if currently inside anyOf/oneOf/allOf
      * @returns Object with all resolvable $refs replaced by their definitions
      */
     private _resolveRefs(
         obj: any,
         root?: Record<string, any>,
         resolutionStack: string[] = [],
-        memo: Record<string, any> = {}
+        memo: Record<string, any> = {},
+        insidePolymorphicKeyword: boolean = false
     ): any {
         // Initialize on first call
         if (root === undefined) {
@@ -131,6 +133,50 @@ export class OCPSchemaDiscovery {
 
         // Handle object types
         if (obj !== null && typeof obj === 'object' && !Array.isArray(obj)) {
+            // Check for polymorphic keywords - process with flag set
+            if ('anyOf' in obj) {
+                const result: Record<string, any> = {
+                    anyOf: obj.anyOf.map((item: any) => 
+                        this._resolveRefs(item, root, resolutionStack, memo, true)
+                    )
+                };
+                // Include other keys if present
+                for (const [k, v] of Object.entries(obj)) {
+                    if (k !== 'anyOf') {
+                        result[k] = this._resolveRefs(v, root, resolutionStack, memo, insidePolymorphicKeyword);
+                    }
+                }
+                return result;
+            }
+            
+            if ('oneOf' in obj) {
+                const result: Record<string, any> = {
+                    oneOf: obj.oneOf.map((item: any) => 
+                        this._resolveRefs(item, root, resolutionStack, memo, true)
+                    )
+                };
+                for (const [k, v] of Object.entries(obj)) {
+                    if (k !== 'oneOf') {
+                        result[k] = this._resolveRefs(v, root, resolutionStack, memo, insidePolymorphicKeyword);
+                    }
+                }
+                return result;
+            }
+            
+            if ('allOf' in obj) {
+                const result: Record<string, any> = {
+                    allOf: obj.allOf.map((item: any) => 
+                        this._resolveRefs(item, root, resolutionStack, memo, true)
+                    )
+                };
+                for (const [k, v] of Object.entries(obj)) {
+                    if (k !== 'allOf') {
+                        result[k] = this._resolveRefs(v, root, resolutionStack, memo, insidePolymorphicKeyword);
+                    }
+                }
+                return result;
+            }
+            
             // Check if this is a $ref
             if ('$ref' in obj && Object.keys(obj).length === 1) {
                 const refPath = obj.$ref as string;
@@ -140,7 +186,24 @@ export class OCPSchemaDiscovery {
                     return obj;
                 }
                 
-                // Check memo cache first
+                // If inside polymorphic keyword, check if ref points to an object
+                if (insidePolymorphicKeyword) {
+                    try {
+                        const resolved = this._lookupRef(root!, refPath);
+                        if (resolved !== null) {
+                            // Check if it's an object schema
+                            if (resolved.type === 'object' || 'properties' in resolved) {
+                                // Keep the $ref unresolved for object schemas
+                                return obj;
+                            }
+                        }
+                    } catch {
+                        // If lookup fails, keep the ref
+                        return obj;
+                    }
+                }
+                
+                // Check memo cache
                 if (refPath in memo) {
                     return memo[refPath];
                 }
@@ -159,7 +222,7 @@ export class OCPSchemaDiscovery {
                     if (resolved !== null) {
                         // Recursively resolve the resolved object with updated stack
                         const newStack = [...resolutionStack, refPath];
-                        const resolvedObj = this._resolveRefs(resolved, root, newStack, memo);
+                        const resolvedObj = this._resolveRefs(resolved, root, newStack, memo, insidePolymorphicKeyword);
                         memo[refPath] = resolvedObj;
                         return resolvedObj;
                     }
@@ -176,14 +239,14 @@ export class OCPSchemaDiscovery {
             // Not a $ref, recursively process all values
             const result: Record<string, any> = {};
             for (const [key, value] of Object.entries(obj)) {
-                result[key] = this._resolveRefs(value, root, resolutionStack, memo);
+                result[key] = this._resolveRefs(value, root, resolutionStack, memo, insidePolymorphicKeyword);
             }
             return result;
         }
         
         // Handle array types
         if (Array.isArray(obj)) {
-            return obj.map(item => this._resolveRefs(item, root, resolutionStack, memo));
+            return obj.map(item => this._resolveRefs(item, root, resolutionStack, memo, insidePolymorphicKeyword));
         }
         
         // Primitives pass through unchanged

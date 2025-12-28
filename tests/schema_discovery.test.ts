@@ -331,6 +331,112 @@ describe('OCP Schema Discovery', () => {
       // The circular ref should be broken with a placeholder
       expect(childrenSchema?.items?.description).toBe('Circular reference');
     });
+
+    test('discover api with polymorphic keywords', async () => {
+      const openApiSpecWithPolymorphic = {
+        openapi: '3.0.0',
+        info: { title: 'Test API', version: '1.0.0' },
+        servers: [{ url: 'https://api.example.com' }],
+        paths: {
+          '/payment': {
+            get: {
+              operationId: 'getPayment',
+              summary: 'Get payment',
+              responses: {
+                '200': {
+                  description: 'Payment retrieved',
+                  content: {
+                    'application/json': {
+                      schema: {
+                        $ref: '#/components/schemas/Payment',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            Payment: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                amount: { type: 'integer' },
+                status: {
+                  anyOf: [
+                    { type: 'string' },
+                    { type: 'null' },
+                  ],
+                },
+                source: {
+                  anyOf: [
+                    { $ref: '#/components/schemas/Card' },
+                    { $ref: '#/components/schemas/BankAccount' },
+                    { $ref: '#/components/schemas/Wallet' },
+                  ],
+                },
+              },
+            },
+            Card: {
+              type: 'object',
+              properties: {
+                brand: { type: 'string' },
+                last4: { type: 'string' },
+              },
+            },
+            BankAccount: {
+              type: 'object',
+              properties: {
+                routing_number: { type: 'string' },
+                account_number: { type: 'string' },
+              },
+            },
+            Wallet: {
+              type: 'object',
+              properties: {
+                provider: { type: 'string' },
+                wallet_id: { type: 'string' },
+              },
+            },
+          },
+        },
+      };
+
+      (global.fetch as jest.MockedFunction<typeof fetch>).mockResolvedValueOnce({
+        ok: true,
+        json: async () => openApiSpecWithPolymorphic,
+      } as Response);
+
+      // Discover API
+      const apiSpec = await discovery.discoverApi('https://api.example.com/openapi.json');
+
+      // Should have one tool
+      expect(apiSpec.tools.length).toBe(1);
+      const tool = apiSpec.tools[0];
+
+      // Verify the response schema exists
+      expect(tool.response_schema).toBeDefined();
+      expect(tool.response_schema?.type).toBe('object');
+      expect(tool.response_schema?.properties).toBeDefined();
+
+      // Status field with primitive anyOf should be resolved
+      const statusSchema = tool.response_schema?.properties?.status;
+      expect(statusSchema?.anyOf).toBeDefined();
+      expect(statusSchema?.anyOf[0]?.type).toBe('string');
+      expect(statusSchema?.anyOf[1]?.type).toBe('null');
+      // Should not contain any $refs
+      expect(JSON.stringify(statusSchema)).not.toContain('$ref');
+
+      // Source field with object $refs in anyOf should keep the refs unresolved
+      const sourceSchema = tool.response_schema?.properties?.source;
+      expect(sourceSchema?.anyOf).toBeDefined();
+      // The $refs to object schemas should be preserved
+      expect(sourceSchema?.anyOf[0]).toEqual({ $ref: '#/components/schemas/Card' });
+      expect(sourceSchema?.anyOf[1]).toEqual({ $ref: '#/components/schemas/BankAccount' });
+      expect(sourceSchema?.anyOf[2]).toEqual({ $ref: '#/components/schemas/Wallet' });
+    });
   });
 
   describe('Search Tools', () => {
