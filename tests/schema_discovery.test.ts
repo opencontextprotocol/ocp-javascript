@@ -70,6 +70,23 @@ describe('OCP Schema Discovery', () => {
               },
             },
           },
+          responses: {
+            '201': {
+              description: 'User created',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'integer' },
+                      name: { type: 'string' },
+                      email: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
       '/users/{id}': {
@@ -84,6 +101,23 @@ describe('OCP Schema Discovery', () => {
               required: true,
             },
           ],
+          responses: {
+            '200': {
+              description: 'User details',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'integer' },
+                      name: { type: 'string' },
+                      email: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -146,7 +180,8 @@ describe('OCP Schema Discovery', () => {
       expect(postUsers!.parameters['email']).toBeDefined();
       expect(postUsers!.parameters['name'].required).toBe(true);
       expect(postUsers!.parameters['email'].required).toBe(true);
-      expect(postUsers!.response_schema).toBeUndefined();
+      expect(postUsers!.response_schema).toBeDefined();
+      expect(postUsers!.response_schema!.type).toBe('object');
 
       // Check GET /users/{id} tool
       const getUsersId = tools.find((t: OCPTool) => t.name === 'getUsersId');
@@ -156,7 +191,8 @@ describe('OCP Schema Discovery', () => {
       expect(getUsersId!.parameters['id']).toBeDefined();
       expect(getUsersId!.parameters['id'].location).toBe('path');
       expect(getUsersId!.parameters['id'].required).toBe(true);
-      expect(getUsersId!.response_schema).toBeUndefined();
+      expect(getUsersId!.response_schema).toBeDefined();
+      expect(getUsersId!.response_schema!.type).toBe('object');
     });
   });
 
@@ -367,7 +403,7 @@ describe('OCP Schema Discovery', () => {
                 status: {
                   anyOf: [
                     { type: 'string' },
-                    { type: 'null' },
+                    { type: 'number' },
                   ],
                 },
                 source: {
@@ -421,11 +457,11 @@ describe('OCP Schema Discovery', () => {
       expect(tool.response_schema?.type).toBe('object');
       expect(tool.response_schema?.properties).toBeDefined();
 
-      // Status field with primitive anyOf should be resolved
-      const statusSchema = tool.response_schema?.properties?.status;
+      // Status field with anyOf should have string and number types
+      const statusSchema = tool?.response_schema?.properties?.status;
       expect(statusSchema?.anyOf).toBeDefined();
-      expect(statusSchema?.anyOf[0]?.type).toBe('string');
-      expect(statusSchema?.anyOf[1]?.type).toBe('null');
+      expect(statusSchema?.anyOf[0]).toEqual({ type: 'string' });
+      expect(statusSchema?.anyOf[1]).toEqual({ type: 'number' });
       // Should not contain any $refs
       expect(JSON.stringify(statusSchema)).not.toContain('$ref');
 
