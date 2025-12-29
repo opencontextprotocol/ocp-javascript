@@ -652,6 +652,226 @@ describe('OCP Schema Discovery', () => {
     });
   });
 
+  describe('Swagger 2.0 Support', () => {
+    const swagger2Spec = {
+      swagger: '2.0',
+      info: {
+        title: 'Swagger 2.0 API',
+        version: '1.0.0',
+        description: 'A test API using Swagger 2.0'
+      },
+      host: 'api.example.com',
+      basePath: '/v1',
+      schemes: ['https'],
+      paths: {
+        '/users': {
+          get: {
+            operationId: 'getUsers',
+            summary: 'List users',
+            description: 'Get a list of all users',
+            parameters: [
+              {
+                name: 'limit',
+                in: 'query',
+                type: 'integer',
+                required: false
+              }
+            ],
+            responses: {
+              '200': {
+                description: 'List of users',
+                schema: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'integer' },
+                      name: { type: 'string' },
+                      email: { type: 'string' }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          post: {
+            operationId: 'createUser',
+            summary: 'Create user',
+            description: 'Create a new user',
+            parameters: [
+              {
+                name: 'body',
+                in: 'body',
+                required: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string' },
+                    email: { type: 'string' }
+                  },
+                  required: ['name', 'email']
+                }
+              }
+            ],
+            responses: {
+              '201': {
+                description: 'User created',
+                schema: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'integer' },
+                    name: { type: 'string' },
+                    email: { type: 'string' }
+                  }
+                }
+              }
+            }
+          }
+        },
+        '/users/{id}': {
+          get: {
+            operationId: 'getUserById',
+            summary: 'Get user',
+            description: 'Get a specific user by ID',
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                type: 'string',
+                required: true
+              }
+            ],
+            responses: {
+              '200': {
+                description: 'User details',
+                schema: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'integer' },
+                    name: { type: 'string' },
+                    email: { type: 'string' }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    };
+
+    it('should detect Swagger 2.0 version', () => {
+      const discovery = new OCPSchemaDiscovery();
+      const version = (discovery as any)._detectSpecVersion(swagger2Spec);
+      expect(version).toBe('swagger_2');
+    });
+
+    it('should extract base URL from Swagger 2.0 (host + basePath + schemes)', () => {
+      const discovery = new OCPSchemaDiscovery();
+      (discovery as any)._specVersion = 'swagger_2';
+      const baseUrl = (discovery as any)._extractBaseUrl(swagger2Spec);
+      expect(baseUrl).toBe('https://api.example.com/v1');
+    });
+
+    it('should extract base URL with multiple schemes (uses first one)', () => {
+      const discovery = new OCPSchemaDiscovery();
+      const spec = {
+        swagger: '2.0',
+        host: 'api.example.com',
+        basePath: '/api',
+        schemes: ['http', 'https']
+      };
+      (discovery as any)._specVersion = 'swagger_2';
+      const baseUrl = (discovery as any)._extractBaseUrl(spec);
+      expect(baseUrl).toBe('http://api.example.com/api');
+    });
+
+    it('should default to https when no schemes', () => {
+      const discovery = new OCPSchemaDiscovery();
+      const spec = {
+        swagger: '2.0',
+        host: 'api.example.com',
+        basePath: '/v2'
+      };
+      (discovery as any)._specVersion = 'swagger_2';
+      const baseUrl = (discovery as any)._extractBaseUrl(spec);
+      expect(baseUrl).toBe('https://api.example.com/v2');
+    });
+
+    it('should parse Swagger 2.0 response schemas', () => {
+      const discovery = new OCPSchemaDiscovery();
+      (discovery as any)._specVersion = 'swagger_2';
+      const responses = swagger2Spec.paths['/users'].get.responses;
+
+      const schema = (discovery as any)._parseResponses(responses, swagger2Spec, {});
+
+      expect(schema).not.toBeNull();
+      expect(schema.type).toBe('array');
+      expect(schema.items).toBeDefined();
+      expect(schema.items.type).toBe('object');
+    });
+
+    it('should parse Swagger 2.0 body parameters', () => {
+      const discovery = new OCPSchemaDiscovery();
+      (discovery as any)._specVersion = 'swagger_2';
+      const postOperation = swagger2Spec.paths['/users'].post;
+      const bodyParam = postOperation.parameters[0];
+
+      const params = (discovery as any)._parseSwagger2BodyParameter(bodyParam, swagger2Spec, {});
+
+      expect(params.name).toBeDefined();
+      expect(params.email).toBeDefined();
+      expect(params.name.type).toBe('string');
+      expect(params.name.required).toBe(true);
+      expect(params.name.location).toBe('body');
+      expect(params.email.required).toBe(true);
+    });
+
+    it('should discover full API with Swagger 2.0 spec', async () => {
+      (global.fetch as jest.Mock) = jest.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => swagger2Spec,
+        })
+      ) as jest.Mock;
+
+      const discovery = new OCPSchemaDiscovery();
+      const apiSpec = await discovery.discoverApi('https://api.example.com/swagger.json');
+
+      expect(apiSpec.title).toBe('Swagger 2.0 API');
+      expect(apiSpec.version).toBe('1.0.0');
+      expect(apiSpec.base_url).toBe('https://api.example.com/v1');
+      expect(apiSpec.tools.length).toBe(3);
+
+      // Check GET /users
+      const getUsers = apiSpec.tools.find(t => t.name === 'getUsers');
+      expect(getUsers).toBeDefined();
+      expect(getUsers!.method).toBe('GET');
+      expect(getUsers!.path).toBe('/users');
+      expect(getUsers!.parameters.limit).toBeDefined();
+      expect(getUsers!.response_schema).toBeDefined();
+      expect(getUsers!.response_schema!.type).toBe('array');
+
+      // Check POST /users
+      const postUsers = apiSpec.tools.find(t => t.name === 'createUser');
+      expect(postUsers).toBeDefined();
+      expect(postUsers!.method).toBe('POST');
+      expect(postUsers!.path).toBe('/users');
+      expect(postUsers!.parameters.name).toBeDefined();
+      expect(postUsers!.parameters.email).toBeDefined();
+      expect(postUsers!.parameters.name.required).toBe(true);
+      expect(postUsers!.response_schema).toBeDefined();
+
+      // Check GET /users/{id}
+      const getUser = apiSpec.tools.find(t => t.name === 'getUserById');
+      expect(getUser).toBeDefined();
+      expect(getUser!.method).toBe('GET');
+      expect(getUser!.path).toBe('/users/{id}');
+      expect(getUser!.parameters.id).toBeDefined();
+      expect(getUser!.parameters.id.location).toBe('path');
+      expect(getUser!.response_schema).toBeDefined();
+    });
+  });
+
   describe('Resource Filtering', () => {
     const openApiSpecWithResources = {
       openapi: '3.0.0',

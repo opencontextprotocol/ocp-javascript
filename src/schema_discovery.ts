@@ -41,6 +41,7 @@ export interface OCPAPISpec {
  */
 export class OCPSchemaDiscovery {
     private cache: Map<string, OCPAPISpec>;
+    private _specVersion?: string;
 
     constructor() {
         this.cache = new Map();
@@ -64,6 +65,7 @@ export class OCPSchemaDiscovery {
         try {
             const spec = await this._fetchSpec(specUrl);
             await this._validateSpec(spec);
+            this._specVersion = this._detectSpecVersion(spec);
             const apiSpec = this._parseOpenApiSpec(spec, baseUrl);
             
             // Cache the result
@@ -129,6 +131,35 @@ export class OCPSchemaDiscovery {
                 `Invalid OpenAPI specification: ${error instanceof Error ? error.message : String(error)}`
             );
         }
+    }
+
+    /**
+     * Detect OpenAPI/Swagger version from spec.
+     * 
+     * @returns Version string: 'swagger_2', 'openapi_3.0', 'openapi_3.1', 'openapi_3.2'
+     */
+    private _detectSpecVersion(spec: Record<string, any>): string {
+        if ('swagger' in spec) {
+            const swaggerVersion = spec.swagger;
+            if (typeof swaggerVersion === 'string' && swaggerVersion.startsWith('2.')) {
+                return 'swagger_2';
+            }
+            throw new SchemaDiscoveryError(`Unsupported Swagger version: ${swaggerVersion}`);
+        } else if ('openapi' in spec) {
+            const openapiVersion = spec.openapi;
+            if (typeof openapiVersion === 'string') {
+                if (openapiVersion.startsWith('3.0')) {
+                    return 'openapi_3.0';
+                } else if (openapiVersion.startsWith('3.1')) {
+                    return 'openapi_3.1';
+                } else if (openapiVersion.startsWith('3.2')) {
+                    return 'openapi_3.2';
+                }
+            }
+            throw new SchemaDiscoveryError(`Unsupported OpenAPI version: ${openapiVersion}`);
+        }
+        
+        throw new SchemaDiscoveryError('Unable to detect spec version: missing "swagger" or "openapi" field');
     }
 
     /**
@@ -316,13 +347,10 @@ export class OCPSchemaDiscovery {
         const version = info.version || '1.0.0';
         const description = info.description || '';
 
-        // Extract base URL
+        // Extract base URL (version-specific)
         let baseUrl = baseUrlOverride;
-        if (!baseUrl && spec.servers && spec.servers.length > 0) {
-            baseUrl = spec.servers[0].url;
-        }
         if (!baseUrl) {
-            throw new SchemaDiscoveryError('No base URL found in OpenAPI spec and none provided');
+            baseUrl = this._extractBaseUrl(spec);
         }
 
         // Extract tools from paths
@@ -352,6 +380,30 @@ export class OCPSchemaDiscovery {
             tools,
             raw_spec: spec
         };
+    }
+
+    /**
+     * Extract base URL from spec (version-aware).
+     */
+    private _extractBaseUrl(spec: Record<string, any>): string {
+        if (this._specVersion === 'swagger_2') {
+            // Swagger 2.0: construct from host, basePath, and schemes
+            const schemes = spec.schemes || ['https'];
+            const host = spec.host || '';
+            const basePath = spec.basePath || '';
+            
+            if (host) {
+                const scheme = schemes.length > 0 ? schemes[0] : 'https';
+                return `${scheme}://${host}${basePath}`;
+            }
+            return '';
+        } else {
+            // OpenAPI 3.x: use servers array
+            if (spec.servers && spec.servers.length > 0) {
+                return spec.servers[0].url || '';
+            }
+            return '';
+        }
     }
 
     /**
@@ -400,13 +452,24 @@ export class OCPSchemaDiscovery {
         const description = operation.summary || operation.description || 'No description provided';
         const tags = operation.tags || [];
 
-        // Parse parameters
+        // Parse parameters (version-aware)
         const parameters = this._parseParameters(operation.parameters || [], specData, memoCache);
 
-        // Add request body parameters for POST/PUT/PATCH
-        if (['POST', 'PUT', 'PATCH'].includes(method.toUpperCase()) && operation.requestBody) {
-            const bodyParams = this._parseRequestBody(operation.requestBody, specData, memoCache);
-            Object.assign(parameters, bodyParams);
+        // Add request body parameters (version-specific)
+        if (['POST', 'PUT', 'PATCH'].includes(method.toUpperCase())) {
+            if (this._specVersion === 'swagger_2') {
+                // Swagger 2.0: body is in parameters array
+                for (const param of (operation.parameters || [])) {
+                    const bodyParams = this._parseSwagger2BodyParameter(param, specData, memoCache);
+                    Object.assign(parameters, bodyParams);
+                }
+            } else {
+                // OpenAPI 3.x: separate requestBody field
+                if (operation.requestBody) {
+                    const bodyParams = this._parseOpenApi3RequestBody(operation.requestBody, specData, memoCache);
+                    Object.assign(parameters, bodyParams);
+                }
+            }
         }
 
         // Parse response schema
@@ -521,9 +584,9 @@ export class OCPSchemaDiscovery {
     }
 
     /**
-     * Parse OpenAPI request body with lazy $ref resolution.
+     * Parse OpenAPI 3.x request body with lazy $ref resolution.
      */
-    private _parseRequestBody(
+    private _parseOpenApi3RequestBody(
         requestBody: any,
         specData: Record<string, any>,
         memoCache: Record<string, any>
@@ -572,7 +635,51 @@ export class OCPSchemaDiscovery {
     }
 
     /**
-     * Parse OpenAPI responses with lazy $ref resolution.
+     * Parse Swagger 2.0 body parameter into parameters.
+     */
+    private _parseSwagger2BodyParameter(
+        param: any,
+        specData: Record<string, any>,
+        memoCache: Record<string, any>
+    ): Record<string, any> {
+        if (!param || typeof param !== 'object' || param.in !== 'body' || !param.schema) {
+            return {};
+        }
+
+        // Resolve the schema if it contains $refs
+        const schema = this._resolveRefs(param.schema, specData, [], memoCache);
+        
+        // Handle object schemas
+        if (schema.type === 'object') {
+            const properties = schema.properties || {};
+            const required = schema.required || [];
+            
+            const result: Record<string, any> = {};
+
+            for (const [name, propSchema] of Object.entries(properties)) {
+                if (typeof propSchema !== 'object' || propSchema === null) continue;
+                
+                const prop = propSchema as Record<string, any>;
+                result[name] = {
+                    description: prop.description || '',
+                    required: required.includes(name),
+                    location: 'body',
+                    type: prop.type || 'string'
+                };
+                
+                if ('enum' in prop) {
+                    result[name].enum = prop.enum;
+                }
+            }
+
+            return result;
+        }
+
+        return {};
+    }
+
+    /**
+     * Parse OpenAPI responses with lazy $ref resolution (version-aware).
      */
     private _parseResponses(
         responses: Record<string, any>,
@@ -582,12 +689,21 @@ export class OCPSchemaDiscovery {
         // Find first 2xx response
         for (const [statusCode, response] of Object.entries(responses)) {
             if (statusCode.startsWith('2') && typeof response === 'object' && response !== null) {
-                const content = response.content || {};
-                const jsonContent = content['application/json'];
-                
-                if (jsonContent && jsonContent.schema) {
-                    // Resolve the schema if it contains $refs
-                    return this._resolveRefs(jsonContent.schema, specData, [], memoCache);
+                if (this._specVersion === 'swagger_2') {
+                    // Swagger 2.0: schema is directly in response
+                    if (response.schema) {
+                        // Resolve the schema if it contains $refs
+                        return this._resolveRefs(response.schema, specData, [], memoCache);
+                    }
+                } else {
+                    // OpenAPI 3.x: schema is in content.application/json
+                    const content = response.content || {};
+                    const jsonContent = content['application/json'];
+                    
+                    if (jsonContent && jsonContent.schema) {
+                        // Resolve the schema if it contains $refs
+                        return this._resolveRefs(jsonContent.schema, specData, [], memoCache);
+                    }
                 }
             }
         }
