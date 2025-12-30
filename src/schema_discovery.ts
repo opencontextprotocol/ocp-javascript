@@ -5,7 +5,6 @@
  */
 
 import { SchemaDiscoveryError } from './errors.js';
-import { Validator } from '@seriousme/openapi-schema-validator';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { homedir } from 'os';
@@ -76,7 +75,6 @@ export class OCPSchemaDiscovery {
 
         try {
             const spec = await this._fetchSpec(specPath);
-            await this._validateSpec(spec);
             this._specVersion = this._detectSpecVersion(spec);
             const apiSpec = this._parseOpenApiSpec(spec, baseUrl);
             
@@ -205,26 +203,6 @@ export class OCPSchemaDiscovery {
             }
             throw new SchemaDiscoveryError(
                 `Failed to load spec from ${filePath}: ${error instanceof Error ? error.message : String(error)}`
-            );
-        }
-    }
-
-    /**
-     * Validate OpenAPI specification structure and version compatibility.
-     */
-    private async _validateSpec(specData: Record<string, any>): Promise<void> {
-        try {
-            const validator = new Validator();
-            const result = await validator.validate(specData);
-            
-            if (!result.valid) {
-                const errors = Array.isArray(result.errors) ? result.errors : [result.errors];
-                const errorMessages = errors.map((err: any) => err.message || String(err)).join(', ');
-                throw new Error(errorMessages);
-            }
-        } catch (error) {
-            throw new SchemaDiscoveryError(
-                `Invalid OpenAPI specification: ${error instanceof Error ? error.message : String(error)}`
             );
         }
     }
