@@ -5,6 +5,11 @@
 import { describe, test, expect, beforeEach, jest } from '@jest/globals';
 import { OCPSchemaDiscovery } from '../src/schema_discovery.js';
 import type { OCPAPISpec, OCPTool } from '../src/schema_discovery.js';
+import { dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Mock fetch globally
 global.fetch = jest.fn() as jest.MockedFunction<typeof fetch>;
@@ -1149,6 +1154,78 @@ describe('OCP Schema Discovery', () => {
       const apiSpec = await discovery.discoverApi('https://api.github.com/openapi.json');
 
       expect(apiSpec.tools.length).toBe(4);
+    });
+  });
+
+  describe('Local File Loading', () => {
+    test('load spec from absolute path (JSON)', async () => {
+      const absolutePath = `${__dirname}/fixtures/test_spec.json`;
+      const apiSpec = await discovery.discoverApi(absolutePath);
+      
+      expect(apiSpec.title).toBe('Test API from File');
+      expect(apiSpec.version).toBe('1.0.0');
+      expect(apiSpec.base_url).toBe('https://api.example.com');
+      expect(apiSpec.tools.length).toBe(1);
+      expect(apiSpec.tools[0].name).toBe('getTest');
+    });
+
+    test('load spec from relative path (JSON)', async () => {
+      const relativePath = './tests/fixtures/test_spec.json';
+      const apiSpec = await discovery.discoverApi(relativePath);
+      
+      expect(apiSpec.title).toBe('Test API from File');
+      expect(apiSpec.tools.length).toBe(1);
+    });
+
+    test('load spec from absolute path (YAML)', async () => {
+      const absolutePath = `${__dirname}/fixtures/test_spec.yaml`;
+      const apiSpec = await discovery.discoverApi(absolutePath);
+      
+      expect(apiSpec.title).toBe('Test API from File');
+      expect(apiSpec.version).toBe('1.0.0');
+      expect(apiSpec.base_url).toBe('https://api.example.com');
+      expect(apiSpec.tools.length).toBe(1);
+      expect(apiSpec.tools[0].name).toBe('getTest');
+    });
+
+    test('load spec from relative path (YAML)', async () => {
+      const relativePath = './tests/fixtures/test_spec.yaml';
+      const apiSpec = await discovery.discoverApi(relativePath);
+      
+      expect(apiSpec.title).toBe('Test API from File');
+      expect(apiSpec.tools.length).toBe(1);
+    });
+
+    test('error on file not found', async () => {
+      await expect(discovery.discoverApi('./nonexistent.json')).rejects.toThrow('File not found');
+    });
+
+    test('error on unsupported file format', async () => {
+      await expect(discovery.discoverApi('./some/file.txt')).rejects.toThrow('Unsupported file format');
+    });
+
+    test('error on invalid JSON', async () => {
+      const invalidJsonPath = `${__dirname}/fixtures/invalid.json`;
+      await expect(discovery.discoverApi(invalidJsonPath)).rejects.toThrow('Invalid JSON');
+    });
+
+    test('error on invalid YAML', async () => {
+      const invalidYamlPath = `${__dirname}/fixtures/invalid.yaml`;
+      await expect(discovery.discoverApi(invalidYamlPath)).rejects.toThrow('Invalid YAML');
+    });
+
+    test('cache normalization for file paths', async () => {
+      // Load via absolute path
+      const absolutePath = `${__dirname}/fixtures/test_spec.json`;
+      const apiSpec1 = await discovery.discoverApi(absolutePath);
+      
+      // Load via relative path (should hit cache)
+      const relativePath = './tests/fixtures/test_spec.json';
+      const apiSpec2 = await discovery.discoverApi(relativePath);
+      
+      // Both should resolve to same spec (from cache)
+      expect(apiSpec1.name).toBe(apiSpec2.name);
+      expect(apiSpec1.tools.length).toBe(apiSpec2.tools.length);
     });
   });
 });

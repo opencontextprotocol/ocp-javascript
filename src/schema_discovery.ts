@@ -6,6 +6,15 @@
 
 import { SchemaDiscoveryError } from './errors.js';
 import { Validator } from '@seriousme/openapi-schema-validator';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import { homedir } from 'os';
+import yaml from 'js-yaml';
+
+// Configuration constants
+const DEFAULT_API_TITLE = 'Unknown API';
+const DEFAULT_API_VERSION = '1.0.0';
+const SUPPORTED_HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'];
 
 /**
  * Tool definition extracted from OpenAPI operation
@@ -50,26 +59,29 @@ export class OCPSchemaDiscovery {
     /**
      * Discover API from OpenAPI specification.
      * 
-     * @param specUrl - URL to OpenAPI specification (JSON or YAML)
+     * @param specPath - URL or file path to OpenAPI specification (JSON or YAML)
      * @param baseUrl - Optional override for API base URL
      * @param includeResources - Optional list of resource names to filter tools by (case-insensitive, first resource segment matching)
      * @param pathPrefix - Optional path prefix to strip before filtering (e.g., '/v1', '/api/v2')
      * @returns API specification with extracted tools
      */
-    async discoverApi(specUrl: string, baseUrl?: string, includeResources?: string[], pathPrefix?: string): Promise<OCPAPISpec> {
+    async discoverApi(specPath: string, baseUrl?: string, includeResources?: string[], pathPrefix?: string): Promise<OCPAPISpec> {
+        // Normalize cache key (absolute path for files, URL as-is)
+        const cacheKey = this._normalizeCacheKey(specPath);
+        
         // Check cache
-        if (this.cache.has(specUrl)) {
-            return this.cache.get(specUrl)!;
+        if (this.cache.has(cacheKey)) {
+            return this.cache.get(cacheKey)!;
         }
 
         try {
-            const spec = await this._fetchSpec(specUrl);
+            const spec = await this._fetchSpec(specPath);
             await this._validateSpec(spec);
             this._specVersion = this._detectSpecVersion(spec);
             const apiSpec = this._parseOpenApiSpec(spec, baseUrl);
             
             // Cache the result
-            this.cache.set(specUrl, apiSpec);
+            this.cache.set(cacheKey, apiSpec);
             
             // Apply resource filtering if specified (only on newly parsed specs)
             if (includeResources) {
@@ -93,12 +105,38 @@ export class OCPSchemaDiscovery {
     }
 
     /**
+     * Normalize cache key: URLs as-is, file paths to absolute.
+     */
+    private _normalizeCacheKey(specPath: string): string {
+        if (specPath.startsWith('http://') || specPath.startsWith('https://')) {
+            return specPath;
+        }
+        // Expand ~ and resolve to absolute path
+        let expanded = specPath;
+        if (specPath === '~' || specPath.startsWith('~/')) {
+            expanded = specPath.replace(/^~/, homedir());
+        }
+        return resolve(expanded);
+    }
+
+    /**
+     * Fetch OpenAPI spec from URL or local file.
+     */
+    private async _fetchSpec(specPath: string): Promise<Record<string, any>> {
+        if (specPath.startsWith('http://') || specPath.startsWith('https://')) {
+            return this._fetchFromUrl(specPath);
+        } else {
+            return this._fetchFromFile(specPath);
+        }
+    }
+
+    /**
      * Fetch OpenAPI specification from URL without resolving $refs.
      * References are resolved lazily during tool creation.
      */
-    private async _fetchSpec(specUrl: string): Promise<Record<string, any>> {
+    private async _fetchFromUrl(url: string): Promise<Record<string, any>> {
         try {
-            const response = await fetch(specUrl);
+            const response = await fetch(url);
             
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -108,7 +146,65 @@ export class OCPSchemaDiscovery {
             
         } catch (error) {
             throw new SchemaDiscoveryError(
-                `Failed to fetch OpenAPI spec from ${specUrl}: ${error instanceof Error ? error.message : String(error)}`
+                `Failed to fetch OpenAPI spec from ${url}: ${error instanceof Error ? error.message : String(error)}`
+            );
+        }
+    }
+
+    /**
+     * Load OpenAPI specification from local JSON or YAML file.
+     */
+    private _fetchFromFile(filePath: string): Record<string, any> {
+        try {
+            // Expand ~ for home directory
+            let expandedPath = filePath;
+            if (filePath === '~' || filePath.startsWith('~/')) {
+                expandedPath = filePath.replace(/^~/, homedir());
+            }
+            
+            // Resolve to absolute path
+            const resolvedPath = resolve(expandedPath);
+            
+            // Check file extension
+            const lowerPath = resolvedPath.toLowerCase();
+            const isJson = lowerPath.endsWith('.json');
+            const isYaml = lowerPath.endsWith('.yaml') || lowerPath.endsWith('.yml');
+            
+            if (!isJson && !isYaml) {
+                const ext = resolvedPath.substring(resolvedPath.lastIndexOf('.'));
+                throw new SchemaDiscoveryError(
+                    `Unsupported file format: ${ext}. Supported formats: .json, .yaml, .yml`
+                );
+            }
+            
+            // Read file
+            const content = readFileSync(resolvedPath, 'utf-8');
+            
+            // Parse based on format
+            if (isJson) {
+                return JSON.parse(content);
+            } else {
+                return yaml.load(content) as Record<string, any>;
+            }
+            
+        } catch (error) {
+            if (error instanceof SchemaDiscoveryError) {
+                throw error;
+            }
+            // YAML errors
+            if (error instanceof yaml.YAMLException) {
+                throw new SchemaDiscoveryError(`Invalid YAML in file ${filePath}: ${error.message}`);
+            }
+            // JSON errors
+            if (error instanceof SyntaxError) {
+                throw new SchemaDiscoveryError(`Invalid JSON in file ${filePath}: ${error.message}`);
+            }
+            // File not found
+            if ((error as any).code === 'ENOENT') {
+                throw new SchemaDiscoveryError(`File not found: ${filePath}`);
+            }
+            throw new SchemaDiscoveryError(
+                `Failed to load spec from ${filePath}: ${error instanceof Error ? error.message : String(error)}`
             );
         }
     }
@@ -343,7 +439,7 @@ export class OCPSchemaDiscovery {
         
         // Extract API info
         const info = spec.info || {};
-        const title = info.title || 'Unknown API';
+        const title = info.title || DEFAULT_API_TITLE;
         const version = info.version || '1.0.0';
         const description = info.description || '';
 
@@ -361,7 +457,7 @@ export class OCPSchemaDiscovery {
             if (typeof pathItem !== 'object' || pathItem === null) continue;
 
             for (const [method, operation] of Object.entries(pathItem as Record<string, any>)) {
-                if (!['get', 'post', 'put', 'delete', 'patch'].includes(method.toLowerCase())) {
+                if (!SUPPORTED_HTTP_METHODS.includes(method.toLowerCase())) {
                     continue;
                 }
 
