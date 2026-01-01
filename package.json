@@ -11,6 +11,7 @@
     "LICENSE"
   ],
   "repository": "https://github.com/opencontextprotocol/ocp-javascript",
+  "homepage": "https://opencontextprotocol.io",
   "bugs": "https://github.com/opencontextprotocol/ocp-javascript/issues",
   "scripts": {
     "build": "tsc",
