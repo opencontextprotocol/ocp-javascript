@@ -86,8 +86,8 @@ const apiClient = wrapApi(context, baseUrl, headers?);
 
 ```bash
 # Clone repository
-git clone https://github.com/opencontextprotocol/specification.git
-cd specification/ocp-javascript
+git clone https://github.com/opencontextprotocol/ocp-javascript.git
+cd ocp-javascript
 
 # Install dependencies
 npm install

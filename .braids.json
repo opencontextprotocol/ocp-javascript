@@ -2,7 +2,7 @@
   "config_version": 1,
   "mirrors": {
     "src/schemas": {
-      "url": "https://github.com/opencontextprotocol/specification.git",
+      "url": "https://github.com/opencontextprotocol/ocp-spec.git",
       "branch": "main",
       "path": "schemas",
       "revision": "3b7a3dbd1fd69ddb9b58f9b15afe6beef001fe6d"
