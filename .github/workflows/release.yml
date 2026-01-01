@@ -39,6 +39,7 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write
 
     steps:
       - name: Checkout repository
@@ -79,8 +80,6 @@ jobs:
 
       - name: Publish to NPM
         if: steps.changelog.outputs.skipped != 'true'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish
 
       - name: Create GitHub Release
