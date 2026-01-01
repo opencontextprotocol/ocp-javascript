@@ -13,31 +13,85 @@ yarn add @opencontextprotocol/agent
 ## Quick Start
 
 ```typescript
-import { OCPAgent, wrapApi } from '@opencontextprotocol/agent';
+import { OCPAgent } from '@opencontextprotocol/agent';
 
 // Create an OCP agent
 const agent = new OCPAgent(
     'api_explorer',
-    undefined,
+    'your-username',
     'my-project',
-    'Analyze API endpoints'
+    'Explore GitHub API'
 );
 
-// Register an API from OpenAPI specification
-const apiSpec = await agent.registerApi(
+// Register an API from the registry (fast lookup)
+const githubApi = await agent.registerApi('github');
+
+// Or register from OpenAPI specification URL
+// const githubApi = await agent.registerApi(
+//     'github',
+//     'https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json'
+// );
+
+// List available tools
+const tools = agent.listTools('github');
+console.log(`Found ${tools.length} GitHub API tools`);
+
+// Call a tool
+const result = await agent.callTool(
+    'usersGetAuthenticated',
+    undefined,
+    'github'
+);
+console.log(result);
+```
+
+## API Registration & Authentication
+
+The `registerApi()` method supports multiple patterns:
+
+```typescript
+// 1. Registry lookup - fastest, uses community registry
+const githubApi = await agent.registerApi('github');
+
+// 2. Registry lookup with authentication
+const githubApi = await agent.registerApi(
     'github',
-    'https://api.github.com/openapi.json'
+    undefined,
+    undefined,
+    { 'Authorization': 'token ghp_your_token_here' }
 );
 
-// Create context-aware HTTP client
-const githubClient = wrapApi(
-    agent.context,
-    'https://api.github.com',
-    { 'Authorization': 'token your_token_here' }
+// 3. Registry lookup with base URL override (e.g., GitHub Enterprise)
+const gheApi = await agent.registerApi(
+    'github',
+    undefined,
+    'https://github.company.com/api/v3',
+    { 'Authorization': 'token ghp_enterprise_token' }
 );
 
-// All requests include OCP context headers
-const response = await githubClient.get('/user');
+// 4. Direct OpenAPI spec URL
+const api = await agent.registerApi(
+    'my-api',
+    'https://api.example.com/openapi.json'
+);
+
+// 5. Direct OpenAPI spec with base URL override and authentication
+const api = await agent.registerApi(
+    'my-api',
+    'https://api.example.com/openapi.json',
+    'https://staging-api.example.com',  // Override for testing
+    { 'X-API-Key': 'your_api_key_here' }
+);
+
+// 6. Local OpenAPI file (JSON or YAML)
+const api = await agent.registerApi(
+    'local-api',
+    'file:///path/to/openapi.yaml',
+    'http://localhost:8000'
+);
+
+// Headers are automatically included in all tool calls
+const result = await agent.callTool('usersGetAuthenticated', undefined, 'github');
 ```
 
 ## Core Components
@@ -69,17 +123,23 @@ context.updateGoal(newGoal, summary?);
 context.toDict();
 ```
 
-### HTTP Client Functions
+### HTTP Client
 
 ```typescript
-import { OCPHTTPClient, wrapApi } from '@opencontextprotocol/agent';
+import { OCPHTTPClient, AgentContext } from '@opencontextprotocol/agent';
+
+// Create context
+const context = new AgentContext({
+    agent_type: 'api_client',
+    user: 'username',
+    workspace: 'project'
+});
 
 // Create OCP-aware HTTP client
-const client = new OCPHTTPClient(context);
-await client.request('GET', url, options);
+const client = new OCPHTTPClient(context, true, 'https://api.example.com');
 
-// Create API-specific client
-const apiClient = wrapApi(context, baseUrl, headers?);
+// Make requests with automatic OCP context headers
+const response = await client.request('GET', '/endpoint');
 ```
 
 ## Development
