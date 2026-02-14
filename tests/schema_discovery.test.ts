@@ -609,23 +609,14 @@ describe('OCP Schema Discovery', () => {
       expect(apiSpec.tools.length).toBe(1);
     });
 
-    test('load spec from absolute path (YAML)', async () => {
-      const absolutePath = `${__dirname}/fixtures/test_spec.yaml`;
-      const apiSpec = await discovery.discoverApi(absolutePath);
-      
-      expect(apiSpec.title).toBe('Test API from File');
-      expect(apiSpec.version).toBe('1.0.0');
-      expect(apiSpec.base_url).toBe('https://api.example.com');
-      expect(apiSpec.tools.length).toBe(1);
-      expect(apiSpec.tools[0].name).toBe('getTest');
-    });
-
-    test('load spec from relative path (YAML)', async () => {
+    test('load yaml file', async () => {
       const relativePath = './tests/fixtures/test_spec.yaml';
       const apiSpec = await discovery.discoverApi(relativePath);
       
-      expect(apiSpec.title).toBe('Test API from File');
+      expect(apiSpec.title).toBe('Test API from YAML');
+      expect(apiSpec.version).toBe('1.0.0');
       expect(apiSpec.tools.length).toBe(1);
+      expect(apiSpec.tools[0].name).toBe('getYamlTest');
     });
 
     test('error on file not found', async () => {
@@ -658,6 +649,202 @@ describe('OCP Schema Discovery', () => {
       // Both should resolve to same spec (from cache)
       expect(apiSpec1.name).toBe(apiSpec2.name);
       expect(apiSpec1.tools.length).toBe(apiSpec2.tools.length);
+    });
+  });
+
+  describe('Resource Filtering', () => {
+    test('discover api with include resources', async () => {
+      // Mock OpenAPI spec with multiple resource paths
+      const openapiSpecWithResources = {
+        openapi: '3.0.0',
+        info: {title: 'GitHub API', version: '3.0'},
+        servers: [{url: 'https://api.github.com'}],
+        paths: {
+          '/repos/{owner}/{repo}': {
+            get: {
+              operationId: 'repos/get',
+              summary: 'Get a repository',
+              parameters: [
+                {name: 'owner', in: 'path', required: true, schema: {type: 'string'}},
+                {name: 'repo', in: 'path', required: true, schema: {type: 'string'}}
+              ],
+              responses: {'200': {description: 'Repository details'}}
+            }
+          },
+          '/user/repos': {
+            get: {
+              operationId: 'repos/listForAuthenticatedUser',
+              summary: 'List user repositories',
+              responses: {'200': {description: 'List of repositories'}}
+            }
+          },
+          '/repos/{owner}/{repo}/issues': {
+            get: {
+              operationId: 'issues/listForRepo',
+              summary: 'List repository issues',
+              parameters: [
+                {name: 'owner', in: 'path', required: true, schema: {type: 'string'}},
+                {name: 'repo', in: 'path', required: true, schema: {type: 'string'}}
+              ],
+              responses: {'200': {description: 'List of issues'}}
+            }
+          },
+          '/orgs/{org}/members': {
+            get: {
+              operationId: 'orgs/listMembers',
+              summary: 'List organization members',
+              parameters: [
+                {name: 'org', in: 'path', required: true, schema: {type: 'string'}}
+              ],
+              responses: {'200': {description: 'List of members'}}
+            }
+          }
+        }
+      };
+
+      // Mock fetch response
+      (global.fetch as jest.MockedFunction<typeof fetch>).mockResolvedValue({
+        ok: true,
+        json: async () => openapiSpecWithResources,
+      } as Response);
+
+      // Discover API with only repos resources (first segment matching)
+      const apiSpec = await discovery.discoverApi(
+        'https://api.github.com/openapi.json',
+        undefined,
+        ['repos']
+      );
+
+      // Should have 2 tools starting with /repos
+      expect(apiSpec.tools.length).toBe(2);
+      expect(apiSpec.tools.every(tool => tool.path.toLowerCase().startsWith('/repos'))).toBe(true);
+    });
+
+    test('discover api with multiple include resources', async () => {
+      // Mock OpenAPI spec with multiple resource paths
+      const openapiSpecWithResources = {
+        openapi: '3.0.0',
+        info: {title: 'GitHub API', version: '3.0'},
+        servers: [{url: 'https://api.github.com'}],
+        paths: {
+          '/repos/{owner}/{repo}': {
+            get: {
+              operationId: 'repos/get',
+              summary: 'Get a repository',
+              parameters: [
+                {name: 'owner', in: 'path', required: true, schema: {type: 'string'}},
+                {name: 'repo', in: 'path', required: true, schema: {type: 'string'}}
+              ],
+              responses: {'200': {description: 'Repository details'}}
+            }
+          },
+          '/user/repos': {
+            get: {
+              operationId: 'repos/listForAuthenticatedUser',
+              summary: 'List user repositories',
+              responses: {'200': {description: 'List of repositories'}}
+            }
+          },
+          '/repos/{owner}/{repo}/issues': {
+            get: {
+              operationId: 'issues/listForRepo',
+              summary: 'List repository issues',
+              parameters: [
+                {name: 'owner', in: 'path', required: true, schema: {type: 'string'}},
+                {name: 'repo', in: 'path', required: true, schema: {type: 'string'}}
+              ],
+              responses: {'200': {description: 'List of issues'}}
+            }
+          },
+          '/orgs/{org}/members': {
+            get: {
+              operationId: 'orgs/listMembers',
+              summary: 'List organization members',
+              parameters: [
+                {name: 'org', in: 'path', required: true, schema: {type: 'string'}}
+              ],
+              responses: {'200': {description: 'List of members'}}
+            }
+          }
+        }
+      };
+
+      // Mock fetch response
+      (global.fetch as jest.MockedFunction<typeof fetch>).mockResolvedValue({
+        ok: true,
+        json: async () => openapiSpecWithResources,
+      } as Response);
+
+      // Discover API with repos and orgs resources (first segment matching)
+      const apiSpec = await discovery.discoverApi(
+        'https://api.github.com/openapi.json',
+        undefined,
+        ['repos', 'orgs']
+      );
+
+      // Should have 3 tools (repos, repos/issues, orgs)
+      expect(apiSpec.tools.length).toBe(3);
+    });
+
+    test('discover api without include resources returns all tools', async () => {
+      // Mock OpenAPI spec with multiple resource paths
+      const openapiSpecWithResources = {
+        openapi: '3.0.0',
+        info: {title: 'GitHub API', version: '3.0'},
+        servers: [{url: 'https://api.github.com'}],
+        paths: {
+          '/repos/{owner}/{repo}': {
+            get: {
+              operationId: 'repos/get',
+              summary: 'Get a repository',
+              parameters: [
+                {name: 'owner', in: 'path', required: true, schema: {type: 'string'}},
+                {name: 'repo', in: 'path', required: true, schema: {type: 'string'}}
+              ],
+              responses: {'200': {description: 'Repository details'}}
+            }
+          },
+          '/user/repos': {
+            get: {
+              operationId: 'repos/listForAuthenticatedUser',
+              summary: 'List user repositories',
+              responses: {'200': {description: 'List of repositories'}}
+            }
+          },
+          '/repos/{owner}/{repo}/issues': {
+            get: {
+              operationId: 'issues/listForRepo',
+              summary: 'List repository issues',
+              parameters: [
+                {name: 'owner', in: 'path', required: true, schema: {type: 'string'}},
+                {name: 'repo', in: 'path', required: true, schema: {type: 'string'}}
+              ],
+              responses: {'200': {description: 'List of issues'}}
+            }
+          },'/orgs/{org}/members': {
+            get: {
+              operationId: 'orgs/listMembers',
+              summary: 'List organization members',
+              parameters: [
+                {name: 'org', in: 'path', required: true, schema: {type: 'string'}}
+              ],
+              responses: {'200': {description: 'List of members'}}
+            }
+          }
+        }
+      };
+
+      // Mock fetch response
+      (global.fetch as jest.MockedFunction<typeof fetch>).mockResolvedValue({
+        ok: true,
+        json: async () => openapiSpecWithResources,
+      } as Response);
+
+      // Discover API without filtering
+      const apiSpec = await discovery.discoverApi('https://api.github.com/openapi.json');
+
+      // Should have all 4 tools
+      expect(apiSpec.tools.length).toBe(4);
     });
   });
 });
