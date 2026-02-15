@@ -1,4 +1,15 @@
-## 0.5.0 (2026-01-03)
+## [1.0.0](https://github.com/opencontextprotocol/ocp-javascript/compare/v0.5.0...v1.0.0) (2026-02-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* Private methods moved from OCPSchemaDiscovery to OpenAPIParser class. Methods like parseOpenApiSpec(), normalizeToolName(), filterToolsByResources(), and others are no longer accessible on OCPSchemaDiscovery. Code using these private methods should use the OpenAPIParser class directly or the public discoverApi() method.
+
+### Features
+
+* refactor tool discovery into extensible parser registry pattern ([9afd6fa](https://github.com/opencontextprotocol/ocp-javascript/commit/9afd6fac88de96801836817a0792d4bb3afb5045))
+
+## [0.5.0](https://github.com/opencontextprotocol/ocp-javascript/compare/7203094e6ab3d9e8b667f95910cfab2aa237972f...v0.5.0) (2026-01-03)
 
 
 ### Features
