@@ -418,20 +418,6 @@ describe('OCP Storage', () => {
         test('should cleanup old sessions', async () => {
             const context = createSampleContext();
 
-            await storage.saveSession('session-1', context);
-            await storage.saveSession('session-2', context);
-            await storage.saveSession('session-3', context);
-
-            const deletedCount = await storage.cleanupSessions(2);
-            expect(deletedCount).toBe(1);
-
-            const sessions = await storage.listSessions();
-            expect(sessions.length).toBe(2);
-        });
-
-        test('should cleanup old sessions', async () => {
-            const context = createSampleContext();
-
             // Create multiple sessions
             for (let i = 1; i <= 5; i++) {
                 await storage.saveSession(`session-${i}`, context);

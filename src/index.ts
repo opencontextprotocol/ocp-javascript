@@ -59,6 +59,13 @@ export {
     type OCPAPISpec
 } from './schema_discovery.js';
 
+// Parser system
+export {
+    APISpecParser,
+    ParserRegistry,
+    OpenAPIParser
+} from './parsers/index.js';
+
 // Registry
 export { OCPRegistry } from './registry.js';
 
